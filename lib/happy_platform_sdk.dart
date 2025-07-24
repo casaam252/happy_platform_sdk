@@ -12,8 +12,8 @@ class HappyPlatform {
   factory HappyPlatform() => _instance;
   HappyPlatform._internal();
 
+  static final Map<String, Dio> _dioInstances = {};
   // Dio instance-ka waxaa loo keydinayaa si guud
-  static Dio? _dio;
 
   /// Initializes the Happy Platform SDK.
   ///
@@ -21,74 +21,71 @@ class HappyPlatform {
   /// [apiKey] waa furahaaga gaarka ah ee project-kaaga.
   /// [apiBaseUrl] waa ciwaanka server-kaaga Happy Platform.
   static void initialize({
-    required String apiKey,
+    required Map<String, String> projects,
     required String apiBaseUrl,
   }) {
-    if (_dio != null) {
+    if (_dioInstances.isNotEmpty) {
       print("⚠️ Happy Platform SDK is already initialized.");
       return;
     }
 
-    _dio = Dio(
-      BaseOptions(
-        baseUrl: apiBaseUrl,
-        headers: {'X-API-Key': apiKey}, // API Key-ga waxaa la diraa mar walba
-        connectTimeout: const Duration(seconds: 15),
-        receiveTimeout: const Duration(seconds: 15),
-      ),
-    );
+    if (projects.isEmpty) {
+      throw ArgumentError('The projects map cannot be empty.');
+    }
 
-    // Ku dar interceptor si uu u soo bandhigo logs faa'iido leh (optional)
-    _dio!.interceptors.add(LogInterceptor(responseBody: true, requestBody: true));
-    
-    print("✅ Happy Platform SDK Initialized Successfully!");
+    // Abuur Dio instance u gaar ah project kasta
+    projects.forEach((projectName, apiKey) {
+      final dio = Dio(
+        BaseOptions(
+          baseUrl: apiBaseUrl,
+          headers: {'X-API-Key': apiKey},
+          connectTimeout: const Duration(seconds: 15),
+          receiveTimeout: const Duration(seconds: 15),
+        ),
+      );
+      dio.interceptors
+          .add(LogInterceptor(responseBody: false, requestBody: true));
+      _dioInstances[projectName] = dio;
+    });
+
+    print(
+        "✅ Happy Platform SDK Initialized for ${projects.length} project(s).");
   }
 
-  /// Returns an instance of the [Firestore] service.
-  ///
-  /// Throws an [Exception] if the SDK has not been initialized.
-  static Firestore firestore() {
-    if (_dio == null) {
-      throw Exception('HappyPlatform.initialize() must be called before using the SDK.');
+  static Firestore firestore([String projectName = 'default']) {
+    final dio = _dioInstances[projectName];
+    if (dio == null) {
+      throw Exception(
+        'Project with name "$projectName" was not initialized. '
+        'Ensure it is included in the projects map during initialization.',
+      );
     }
-    return Firestore(dio: _dio!);
+    return Firestore(dio: dio);
   }
 }
 
-
 // Qaybta 2: Class-ka Maareeya Adeegga Firestore
+// (ISMA BEDDELIN)
 class Firestore {
   final Dio dio;
   Firestore({required this.dio});
 
-  /// Returns a [CollectionReference] for the specified [collectionId].
   CollectionReference collection(String collectionId) {
     return CollectionReference(dio: dio, path: collectionId);
   }
 }
-
-
-// Qaybta 3: Class-ka Maareeya Collection-ka
 class CollectionReference {
   final Dio dio;
   final String path;
   CollectionReference({required this.dio, required this.path});
 
-  /// Returns a [DocumentReference] for the specified [documentId].
   DocumentReference document(String documentId) {
-    // URL-ka saxda ah waa: /firestore/collections/{collectionPath}/documents/{documentId}
     return DocumentReference(dio: dio, collectionPath: path, documentId: documentId);
   }
 
-  /// Adds a new document with a server-generated ID to this collection.
-  ///
-  /// Returns a [DocumentReference] pointing to the newly created document.
   Future<DocumentReference> add(Map<String, dynamic> data) async {
     try {
-      final response = await dio.post(
-        '/firestore/collections/$path/documents',
-        data: data,
-      );
+      final response = await dio.post('/firestore/collections/$path/documents', data: data);
       final newDocId = response.data['id'];
       return DocumentReference(dio: dio, collectionPath: path, documentId: newDocId);
     } on DioException catch (e) {
@@ -96,9 +93,6 @@ class CollectionReference {
     }
   }
 
-  /// Reads all the documents in this collection.
-  ///
-  /// Returns a [QuerySnapshot] containing the documents.
   Future<QuerySnapshot> get() async {
     try {
       final response = await dio.get('/firestore/collections/$path/documents');
@@ -110,7 +104,6 @@ class CollectionReference {
 }
 
 
-// Qaybta 4: Class-ka Maareeya Hal Document
 class DocumentReference {
   final Dio dio;
   final String collectionPath;
@@ -128,7 +121,8 @@ class DocumentReference {
   /// Deletes the document.
   Future<void> delete() async {
     try {
-      await dio.delete('/firestore/collections/$collectionPath/documents/$documentId');
+      await dio.delete(
+          '/firestore/collections/$collectionPath/documents/$documentId');
     } on DioException catch (e) {
       throw _handleDioError(e, 'Failed to delete document');
     }
@@ -145,13 +139,14 @@ class DocumentReference {
       throw _handleDioError(e, 'Failed to update document');
     }
   }
-  
+
   /// Reads a single document.
   ///
   /// NOTE: This requires a new endpoint on the backend:
   /// `GET /firestore/collections/{collectionName}/documents/{documentId}`
   Future<DocumentSnapshot> get() async {
-    throw UnimplementedError('get() on a document is not yet supported on the backend.');
+    throw UnimplementedError(
+        'get() on a document is not yet supported on the backend.');
   }
 
   /// Returns a [CollectionReference] for a sub-collection within this document.
@@ -162,7 +157,6 @@ class DocumentReference {
     return CollectionReference(dio: dio, path: newPath);
   }
 }
-
 
 // Qaybta 5: Classes-ka Caawimaadda ah ee Natiijooyinka
 /// A snapshot of a query, containing a list of [DocumentSnapshot]s.
@@ -175,7 +169,8 @@ class QuerySnapshot {
 
   factory QuerySnapshot.fromResponse(Response response) {
     final List<dynamic> data = (response.data as List<dynamic>?) ?? [];
-    final docs = data.map((docData) => DocumentSnapshot.fromMap(docData)).toList();
+    final docs =
+        data.map((docData) => DocumentSnapshot.fromMap(docData)).toList();
     return QuerySnapshot(docs: docs);
   }
 }
@@ -194,7 +189,6 @@ class DocumentSnapshot {
     );
   }
 }
-
 
 // Qaybta 6: Shaqo Caawimaad ah oo Maareysa Khaladaadka
 String _handleDioError(DioException e, String defaultMessage) {
