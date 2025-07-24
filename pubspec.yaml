@@ -1,0 +1,28 @@
+name: happy_platform_sdk
+description: A powerful Flutter client for the Happy Platform BaaS. Enables fluent, type-safe access to your self-hosted Firestore-like database.
+version: 0.0.1
+homepage: https://github.com/casaam252/happy_platform_sdk # <-- BEDDEL KAN!
+repository: https://github.com/casaam252/happy_platform_sdk # <-- KANNA BEDDEL!
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+  flutter: '>=3.3.0'
+
+dependencies:
+  # 'flutter' dependency looma baahna halkan maadaama aysan jirin wax UI ah, 
+  # laakiin way fiican tahay in la iska daayo haddii mustaqbalka wax laga beddelo.
+  flutter:
+    sdk: flutter
+  
+  # Package-ka kaliya ee aan u baahanahay waa 'dio'.
+  dio: ^5.4.0 # Waxaan u cusbooneysiinay version-ka ugu dambeeya
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+# Qaybta 'flutter' looma baahna maadaama package-kani uusan lahayn
+# wax assets, fonts, ama material design ah oo u gaar ah.
+# Tirtiriddeedu waxay ka dhigaysaa mid nadiif ah.
+# Laakiin haddii aad ka tagto dhib ma leh.
