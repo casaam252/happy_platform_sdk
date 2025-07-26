@@ -212,11 +212,12 @@ class DocumentSnapshot {
 //==============================================================================
 // Qaybta 3: Realtime Database
 //==============================================================================
+
 class RealtimeDatabase {
   final String wsUrl;
   WebSocketChannel? _channel;
   final StreamController<RealtimeSnapshot> _streamController;
-
+  
   RealtimeDatabase({required this.wsUrl}) : _streamController = StreamController.broadcast() {
     _connect();
   }
@@ -281,7 +282,7 @@ class DatabaseReference {
   Future<void> set(dynamic data) async {
     channel?.sink.add(json.encode({'type': 'set', 'path': path, 'payload': data}));
   }
-
+  
   void off() {
     channel?.sink.add(json.encode({'type': 'unsubscribe', 'path': path}));
   }
