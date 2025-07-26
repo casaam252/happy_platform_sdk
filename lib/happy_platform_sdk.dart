@@ -1,22 +1,22 @@
 library happy_platform_sdk;
 
+import 'dart:async';
+import 'dart:convert';
 import 'package:dio/dio.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 //==============================================================================
 // Qaybta 1: Entry Point & Initialization
 //==============================================================================
 
-/// The main class for interacting with the Happy Platform SDK.
 class HappyPlatform {
-  // Singleton pattern to ensure a single instance.
   static final HappyPlatform _instance = HappyPlatform._internal();
   factory HappyPlatform() => _instance;
   HappyPlatform._internal();
 
   static final Map<String, Dio> _dioInstances = {};
+  static String? _apiBaseUrl;
 
-  /// Initializes the Happy Platform SDK for one or more projects.
-  /// This must be called once, typically in your `main.dart`.
   static void initialize({
     required Map<String, String> projects,
     required String apiBaseUrl,
@@ -25,60 +25,52 @@ class HappyPlatform {
       print("⚠️ Happy Platform SDK is already initialized.");
       return;
     }
-    if (projects.isEmpty) {
-      throw ArgumentError('The projects map cannot be empty.');
-    }
-
+    _apiBaseUrl = apiBaseUrl;
     projects.forEach((projectName, apiKey) {
       final dio = Dio(
         BaseOptions(
           baseUrl: apiBaseUrl,
           headers: {'X-API-Key': apiKey},
-          connectTimeout: const Duration(seconds: 15),
-          receiveTimeout: const Duration(seconds: 15),
         ),
       );
       dio.interceptors.add(LogInterceptor(responseBody: false, requestBody: true));
       _dioInstances[projectName] = dio;
     });
-
     print("✅ Happy Platform SDK Initialized for ${projects.length} project(s).");
   }
 
-  /// Returns an instance of the [Firestore] service for a specific project.
-  /// If [projectName] is not provided, it defaults to 'default'.
   static Firestore firestore([String projectName = 'default']) {
     final dio = _dioInstances[projectName];
-    if (dio == null) {
-      throw Exception(
-        'Project with name "$projectName" was not initialized. '
-        'Ensure it is included in the projects map during initialization.',
-      );
-    }
+    if (dio == null) throw Exception('Project "$projectName" not initialized.');
     return Firestore(dio: dio);
+  }
+
+  static RealtimeDatabase realtimeDatabase([String projectName = 'default']) {
+    final dio = _dioInstances[projectName];
+    final apiKey = dio?.options.headers['X-API-Key'];
+    if (_apiBaseUrl == null || apiKey == null) {
+      throw Exception('Project "$projectName" not initialized.');
+    }
+    final wsUrl = _apiBaseUrl!
+        .replaceFirst('http', 'ws')
+        .replaceFirst('/api/v1', '');
+    return RealtimeDatabase(wsUrl: '$wsUrl/ws?apiKey=$apiKey');
   }
 }
 
 //==============================================================================
-// Qaybta 2: Firestore Service
+// Qaybta 2: Firestore
 //==============================================================================
 
-/// The entry point for all Firestore operations.
 class Firestore {
   final Dio dio;
   Firestore({required this.dio});
 
-  /// Returns a [CollectionReference] for the specified [collectionId].
   CollectionReference collection(String collectionId) {
     return CollectionReference(dio: dio, path: collectionId);
   }
 }
 
-//==============================================================================
-// Qaybta 3: Querying Classes (Query & CollectionReference)
-//==============================================================================
-
-/// A `Query` refers to a query across a collection of documents.
 class Query {
   final Dio dio;
   final String path;
@@ -90,7 +82,6 @@ class Query {
     Map<String, dynamic>? queryParameters,
   }) : _queryParameters = queryParameters ?? {};
 
-  /// Creates a new query with an additional filter.
   Query where(String field, {
     dynamic isEqualTo,
     dynamic isNotEqualTo,
@@ -101,33 +92,28 @@ class Query {
   }) {
     final newParams = Map<String, dynamic>.from(_queryParameters);
     List<String> whereClauses = List<String>.from(newParams['where'] ?? []);
-    
     if (isEqualTo != null) whereClauses.add('$field,==,$isEqualTo');
     if (isNotEqualTo != null) whereClauses.add('$field,!=,$isNotEqualTo');
     if (isGreaterThan != null) whereClauses.add('$field,>,$isGreaterThan');
     if (isLessThan != null) whereClauses.add('$field,<,$isLessThan');
     if (isGreaterThanOrEqualTo != null) whereClauses.add('$field,>=,$isGreaterThanOrEqualTo');
     if (isLessThanOrEqualTo != null) whereClauses.add('$field,<=,$isLessThanOrEqualTo');
-
     newParams['where'] = whereClauses;
     return Query(dio: dio, path: path, queryParameters: newParams);
   }
 
-  /// Creates a new query with an ordering constraint.
   Query orderBy(String field, {bool descending = false}) {
     final newParams = Map<String, dynamic>.from(_queryParameters);
     newParams['orderBy'] = '$field,${descending ? 'desc' : 'asc'}';
     return Query(dio: dio, path: path, queryParameters: newParams);
   }
   
-  /// Creates a new query with a document limit.
   Query limit(int count) {
     final newParams = Map<String, dynamic>.from(_queryParameters);
     newParams['limit'] = count;
     return Query(dio: dio, path: path, queryParameters: newParams);
   }
 
-  /// Executes the query and returns a [QuerySnapshot].
   Future<QuerySnapshot> get() async {
     try {
       final response = await dio.get(
@@ -141,17 +127,13 @@ class Query {
   }
 }
 
-
-/// A `CollectionReference` is a `Query` that can also be used to add new documents.
 class CollectionReference extends Query {
   CollectionReference({required super.dio, required super.path});
 
-  /// Returns a [DocumentReference] for the specified [documentId].
   DocumentReference document(String documentId) {
     return DocumentReference(dio: dio, collectionPath: path, documentId: documentId);
   }
 
-  /// Adds a new document with a server-generated ID to this collection.
   Future<DocumentReference> add(Map<String, dynamic> data) async {
     try {
       final response = await dio.post('/firestore/collections/$path/documents', data: data);
@@ -163,26 +145,14 @@ class CollectionReference extends Query {
   }
 }
 
-//==============================================================================
-// Qaybta 4: DocumentReference
-//==============================================================================
-
-/// A `DocumentReference` refers to a specific document in a collection.
 class DocumentReference {
   final Dio dio;
   final String collectionPath;
   final String documentId;
+  DocumentReference({required this.dio, required this.collectionPath, required this.documentId});
 
-  DocumentReference({
-    required this.dio,
-    required this.collectionPath,
-    required this.documentId,
-  });
-
-  /// The ID of this document.
   String get id => documentId;
 
-  /// Deletes the document.
   Future<void> delete() async {
     try {
       await dio.delete('/firestore/collections/$collectionPath/documents/$documentId');
@@ -191,7 +161,6 @@ class DocumentReference {
     }
   }
 
-  /// Updates fields in the document.
   Future<void> update(Map<String, dynamic> data) async {
     try {
       await dio.put(
@@ -203,24 +172,16 @@ class DocumentReference {
     }
   }
 
-  /// Reads a single document.
-  /// NOTE: This requires a backend endpoint not yet implemented.
   Future<DocumentSnapshot> get() async {
     throw UnimplementedError('get() on a document is not yet supported on the backend.');
   }
 
-  /// Returns a [CollectionReference] for a sub-collection within this document.
   CollectionReference collection(String subCollectionId) {
     final newPath = '$collectionPath/$documentId/$subCollectionId';
     return CollectionReference(dio: dio, path: newPath);
   }
 }
 
-//==============================================================================
-// Qaybta 5: Data Models (QuerySnapshot & DocumentSnapshot)
-//==============================================================================
-
-/// A snapshot of a query, containing a list of [DocumentSnapshot]s.
 class QuerySnapshot {
   final List<DocumentSnapshot> docs;
   int get size => docs.length;
@@ -235,11 +196,9 @@ class QuerySnapshot {
   }
 }
 
-/// A snapshot of a single document, containing its ID and data.
 class DocumentSnapshot {
   final String id;
   final Map<String, dynamic> data;
-
   DocumentSnapshot({required this.id, required this.data});
 
   factory DocumentSnapshot.fromMap(Map<String, dynamic> map) {
@@ -251,7 +210,99 @@ class DocumentSnapshot {
 }
 
 //==============================================================================
-// Qaybta 6: Error Handling Helper
+// Qaybta 3: Realtime Database
+//==============================================================================
+class RealtimeDatabase {
+  final String wsUrl;
+  WebSocketChannel? _channel;
+  final StreamController<RealtimeSnapshot> _streamController;
+
+  RealtimeDatabase({required this.wsUrl}) : _streamController = StreamController.broadcast() {
+    _connect();
+  }
+
+  void _connect() {
+    try {
+      _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
+      _channel!.stream.listen((message) {
+        try {
+          final decoded = json.decode(message);
+          if (decoded['type'] == 'data' || decoded['type'] == 'update') {
+            _streamController.add(RealtimeSnapshot.fromJson(decoded));
+          }
+        } catch (e) {
+          _streamController.addError('Failed to parse server message: $e');
+        }
+      },
+      onError: (error) => _streamController.addError(error),
+      onDone: () => _streamController.addError('Connection closed.'),
+      );
+    } catch (e) {
+      _streamController.addError('Failed to connect to WebSocket: $e');
+    }
+  }
+
+  DatabaseReference reference(String path) {
+    return DatabaseReference(
+      path: path,
+      channel: _channel,
+      stream: _streamController.stream,
+    );
+  }
+
+  void goOffline() {
+    _channel?.sink.close();
+  }
+
+  void goOnline() {
+    if (_channel == null || _channel?.closeCode != null) {
+      _connect();
+    }
+  }
+}
+
+// **CLASS-KA OO LA ISKU DARAY OO LA SAXAY**
+class DatabaseReference {
+  final String path;
+  final WebSocketChannel? channel;
+  final Stream<RealtimeSnapshot> stream;
+
+  DatabaseReference({
+    required this.path,
+    required this.channel,
+    required this.stream,
+  });
+
+  Stream<RealtimeSnapshot> onValue() {
+    channel?.sink.add(json.encode({'type': 'subscribe', 'path': path}));
+    return stream.where((snapshot) => snapshot.path == path);
+  }
+
+  Future<void> set(dynamic data) async {
+    channel?.sink.add(json.encode({'type': 'set', 'path': path, 'payload': data}));
+  }
+
+  void off() {
+    channel?.sink.add(json.encode({'type': 'unsubscribe', 'path': path}));
+  }
+}
+
+class RealtimeSnapshot {
+  final String path;
+  final dynamic value;
+
+  RealtimeSnapshot({required this.path, this.value});
+
+  factory RealtimeSnapshot.fromJson(Map<String, dynamic> json) {
+    return RealtimeSnapshot(
+      path: json['path'],
+      value: json['payload'],
+    );
+  }
+}
+
+//==============================================================================
+// Qaybta 4: Error Handling Helper
 //==============================================================================
 
 String _handleDioError(DioException e, String defaultMessage) {

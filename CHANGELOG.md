@@ -1,3 +1,13 @@
+0.3.0
+
+BIG FEATURE: Added support for Realtime Database via WebSockets.
+
+New HappyPlatform.realtimeDatabase() entry point.
+
+Added RealtimeDatabase and DatabaseReference classes for live data synchronization.
+
+Supports onValue() for listening to streams and set() for writing data.
+
 0.2.0
 
 FEATURE: Added support for advanced queries (where, orderBy, limit).
@@ -21,4 +31,3 @@ Initial release of the Happy Platform SDK.
 Supports full CRUD operations (Create, Read, Update, Delete).
 
 Provides a simple, fluent API for interacting with your Happy Platform backend.
-
