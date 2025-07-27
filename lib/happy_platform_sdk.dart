@@ -3,12 +3,14 @@ library happy_platform_sdk;
 import 'dart:async';
 import 'dart:convert';
 import 'package:dio/dio.dart';
+import 'package:uuid/uuid.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 //==============================================================================
 // Qaybta 1: Entry Point & Initialization
 //==============================================================================
 
+/// The main class for interacting with the Happy Platform SDK.
 class HappyPlatform {
   static final HappyPlatform _instance = HappyPlatform._internal();
   factory HappyPlatform() => _instance;
@@ -16,7 +18,10 @@ class HappyPlatform {
 
   static final Map<String, Dio> _dioInstances = {};
   static String? _apiBaseUrl;
+  static final Map<String, RealtimeDatabase> _realtimeInstances = {};
 
+  /// Initializes the Happy Platform SDK for one or more projects.
+  /// This must be called once, typically in your `main.dart`.
   static void initialize({
     required Map<String, String> projects,
     required String apiBaseUrl,
@@ -31,6 +36,8 @@ class HappyPlatform {
         BaseOptions(
           baseUrl: apiBaseUrl,
           headers: {'X-API-Key': apiKey},
+          connectTimeout: const Duration(seconds: 15),
+          receiveTimeout: const Duration(seconds: 15),
         ),
       );
       dio.interceptors.add(LogInterceptor(responseBody: false, requestBody: true));
@@ -39,22 +46,33 @@ class HappyPlatform {
     print("✅ Happy Platform SDK Initialized for ${projects.length} project(s).");
   }
 
+  /// Returns an instance of the [Firestore] service for a specific project.
+  /// If [projectName] is not provided, it defaults to 'default'.
   static Firestore firestore([String projectName = 'default']) {
     final dio = _dioInstances[projectName];
     if (dio == null) throw Exception('Project "$projectName" not initialized.');
     return Firestore(dio: dio);
   }
 
+  /// Returns a persistent instance of the [RealtimeDatabase] service for a specific project.
+  /// If [projectName] is not provided, it defaults to 'default'.
   static RealtimeDatabase realtimeDatabase([String projectName = 'default']) {
+    if (_realtimeInstances.containsKey(projectName)) {
+      final instance = _realtimeInstances[projectName]!;
+      instance.goOnline(); // Hubi inuu `connected` yahay
+      return instance;
+    }
+
     final dio = _dioInstances[projectName];
     final apiKey = dio?.options.headers['X-API-Key'];
     if (_apiBaseUrl == null || apiKey == null) {
       throw Exception('Project "$projectName" not initialized.');
     }
-    final wsUrl = _apiBaseUrl!
-        .replaceFirst('http', 'ws')
-        .replaceFirst('/api/v1', '');
-    return RealtimeDatabase(wsUrl: '$wsUrl/ws?apiKey=$apiKey');
+    final wsUrl = _apiBaseUrl!.replaceFirst('http', 'ws').replaceFirst('/api/v1', '');
+    
+    final newInstance = RealtimeDatabase._internal(wsUrl: '$wsUrl/ws?apiKey=$apiKey');
+    _realtimeInstances[projectName] = newInstance;
+    return newInstance;
   }
 }
 
@@ -62,15 +80,18 @@ class HappyPlatform {
 // Qaybta 2: Firestore
 //==============================================================================
 
+/// The entry point for all Firestore operations.
 class Firestore {
   final Dio dio;
   Firestore({required this.dio});
 
+  /// Returns a [CollectionReference] for the specified [collectionId].
   CollectionReference collection(String collectionId) {
     return CollectionReference(dio: dio, path: collectionId);
   }
 }
 
+/// A `Query` refers to a query across a collection of documents.
 class Query {
   final Dio dio;
   final String path;
@@ -82,6 +103,7 @@ class Query {
     Map<String, dynamic>? queryParameters,
   }) : _queryParameters = queryParameters ?? {};
 
+  /// Creates a new query with an additional filter.
   Query where(String field, {
     dynamic isEqualTo,
     dynamic isNotEqualTo,
@@ -102,18 +124,21 @@ class Query {
     return Query(dio: dio, path: path, queryParameters: newParams);
   }
 
+  /// Creates a new query with an ordering constraint.
   Query orderBy(String field, {bool descending = false}) {
     final newParams = Map<String, dynamic>.from(_queryParameters);
     newParams['orderBy'] = '$field,${descending ? 'desc' : 'asc'}';
     return Query(dio: dio, path: path, queryParameters: newParams);
   }
   
+  /// Creates a new query with a document limit.
   Query limit(int count) {
     final newParams = Map<String, dynamic>.from(_queryParameters);
     newParams['limit'] = count;
     return Query(dio: dio, path: path, queryParameters: newParams);
   }
 
+  /// Executes the query and returns a [QuerySnapshot].
   Future<QuerySnapshot> get() async {
     try {
       final response = await dio.get(
@@ -127,13 +152,16 @@ class Query {
   }
 }
 
+/// A `CollectionReference` is a `Query` that can also be used to add new documents.
 class CollectionReference extends Query {
   CollectionReference({required super.dio, required super.path});
 
+  /// Returns a [DocumentReference] for the specified [documentId].
   DocumentReference document(String documentId) {
     return DocumentReference(dio: dio, collectionPath: path, documentId: documentId);
   }
 
+  /// Adds a new document with a server-generated ID to this collection.
   Future<DocumentReference> add(Map<String, dynamic> data) async {
     try {
       final response = await dio.post('/firestore/collections/$path/documents', data: data);
@@ -145,6 +173,7 @@ class CollectionReference extends Query {
   }
 }
 
+/// A `DocumentReference` refers to a specific document in a collection.
 class DocumentReference {
   final Dio dio;
   final String collectionPath;
@@ -186,7 +215,6 @@ class QuerySnapshot {
   final List<DocumentSnapshot> docs;
   int get size => docs.length;
   bool get isEmpty => docs.isEmpty;
-
   QuerySnapshot({required this.docs});
 
   factory QuerySnapshot.fromResponse(Response response) {
@@ -217,74 +245,113 @@ class RealtimeDatabase {
   final String wsUrl;
   WebSocketChannel? _channel;
   final StreamController<RealtimeSnapshot> _streamController;
+  Timer? _reconnectTimer;
+  bool _isConnected = false;
   
-  RealtimeDatabase({required this.wsUrl}) : _streamController = StreamController.broadcast() {
-    _connect();
-  }
-
+  RealtimeDatabase._internal({required this.wsUrl}) : _streamController = StreamController.broadcast();
+  
   void _connect() {
+    if (_isConnected) return;
+    print("🔌 [RTDB] Connecting to: $wsUrl");
     try {
       _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
-      _channel!.stream.listen((message) {
-        try {
-          final decoded = json.decode(message);
-          if (decoded['type'] == 'data' || decoded['type'] == 'update') {
-            _streamController.add(RealtimeSnapshot.fromJson(decoded));
+      _isConnected = true;
+      _reconnectTimer?.cancel(); // Jooji isku daygii hore ee reconnect
+
+      _channel!.stream.listen(
+        (message) {
+          try {
+            final decoded = json.decode(message);
+            if (decoded['type'] == 'data' || decoded['type'] == 'update') {
+              _streamController.add(RealtimeSnapshot.fromJson(decoded));
+            }
+          } catch (e) {
+             _streamController.addError(Exception('Failed to parse server message: $e'));
           }
-        } catch (e) {
-          _streamController.addError('Failed to parse server message: $e');
-        }
-      },
-      onError: (error) => _streamController.addError(error),
-      onDone: () => _streamController.addError('Connection closed.'),
+        },
+        onDone: () {
+          if (_isConnected) {
+            _isConnected = false;
+            _streamController.addError(Exception('Connection closed.'));
+            _tryReconnect();
+          }
+        },
+        onError: (error) {
+          _isConnected = false;
+          _streamController.addError(error);
+          _tryReconnect();
+        },
+        cancelOnError: false,
       );
     } catch (e) {
-      _streamController.addError('Failed to connect to WebSocket: $e');
+      _isConnected = false;
+      _streamController.addError(Exception('Failed to connect: $e'));
+      _tryReconnect();
     }
   }
 
-  DatabaseReference reference(String path) {
-    return DatabaseReference(
-      path: path,
-      channel: _channel,
-      stream: _streamController.stream,
-    );
+  void _tryReconnect() {
+    if (!_isConnected) {
+       _reconnectTimer?.cancel();
+      _reconnectTimer = Timer(const Duration(seconds: 5), () {
+        print("🔄 [RTDB] Attempting to reconnect...");
+        _connect();
+      });
+    }
+  }
+
+  DatabaseReference reference([String path = '/']) {
+    return DatabaseReference(db: this, path: path);
   }
 
   void goOffline() {
+    _isConnected = false;
+    _reconnectTimer?.cancel();
     _channel?.sink.close();
+    _channel = null;
   }
 
   void goOnline() {
-    if (_channel == null || _channel?.closeCode != null) {
-      _connect();
-    }
+    _connect();
   }
 }
 
-// **CLASS-KA OO LA ISKU DARAY OO LA SAXAY**
 class DatabaseReference {
+  final RealtimeDatabase db;
   final String path;
-  final WebSocketChannel? channel;
-  final Stream<RealtimeSnapshot> stream;
 
-  DatabaseReference({
-    required this.path,
-    required this.channel,
-    required this.stream,
-  });
+  DatabaseReference({required this.db, required this.path});
 
   Stream<RealtimeSnapshot> onValue() {
-    channel?.sink.add(json.encode({'type': 'subscribe', 'path': path}));
-    return stream.where((snapshot) => snapshot.path == path);
+    _sendMessage({'type': 'subscribe', 'path': path});
+    return db._streamController.stream.where((snapshot) => snapshot.path == path);
   }
 
-  Future<void> set(dynamic data) async {
-    channel?.sink.add(json.encode({'type': 'set', 'path': path, 'payload': data}));
+  DatabaseReference push() {
+    final newId = const Uuid().v4();
+    return DatabaseReference(db: db, path: path == '/' ? newId : '$path/$newId');
+  }
+
+  Future<void> update(Map<String, dynamic> data) async {
+    _sendMessage({'type': 'update', 'path': path, 'payload': data});
   }
   
+  Future<void> set(dynamic data) async {
+    _sendMessage({'type': 'set', 'path': path, 'payload': data});
+  }
+  
+  Future<void> remove() async {
+    await set(null);
+  }
+
   void off() {
-    channel?.sink.add(json.encode({'type': 'unsubscribe', 'path': path}));
+    _sendMessage({'type': 'unsubscribe', 'path': path});
+  }
+
+  void _sendMessage(Map<String, dynamic> message) {
+    if (db._channel != null) {
+      db._channel!.sink.add(json.encode(message));
+    }
   }
 }
 
