@@ -2,6 +2,7 @@ library happy_platform_sdk;
 
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:uuid/uuid.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -40,10 +41,12 @@ class HappyPlatform {
           receiveTimeout: const Duration(seconds: 15),
         ),
       );
-      dio.interceptors.add(LogInterceptor(responseBody: false, requestBody: true));
+      dio.interceptors
+          .add(LogInterceptor(responseBody: false, requestBody: true));
       _dioInstances[projectName] = dio;
     });
-    print("✅ Happy Platform SDK Initialized for ${projects.length} project(s).");
+    print(
+        "✅ Happy Platform SDK Initialized for ${projects.length} project(s).");
   }
 
   /// Returns an instance of the [Firestore] service for a specific project.
@@ -68,11 +71,34 @@ class HappyPlatform {
     if (_apiBaseUrl == null || apiKey == null) {
       throw Exception('Project "$projectName" not initialized.');
     }
-    final wsUrl = _apiBaseUrl!.replaceFirst('http', 'ws').replaceFirst('/api/v1', '');
-    
-    final newInstance = RealtimeDatabase._internal(wsUrl: '$wsUrl/ws?apiKey=$apiKey');
+    final wsUrl =
+        _apiBaseUrl!.replaceFirst('http', 'ws').replaceFirst('/api/v1', '');
+
+    final newInstance =
+        RealtimeDatabase._internal(wsUrl: '$wsUrl/ws?apiKey=$apiKey');
     _realtimeInstances[projectName] = newInstance;
     return newInstance;
+  }
+
+  // ✅✅✅ QAYBTA CUSUB EE LAGU DARAY ✅✅✅
+  /// Returns an instance of the [Auth] service for a specific project.
+  /// This is used for managing users from a backend or admin panel, not for client-side login.
+  /// If [projectName] is not provided, it defaults to 'default'.
+  static Auth auth([String projectName = 'default']) {
+    final dio = _dioInstances[projectName];
+    if (dio == null) throw Exception('Project "$projectName" not initialized.');
+    // Waxaan u gudbineynaa API key-ga si toos ah, maadaama endpoint-yada auth-ku ay u baahan yihiin developer login
+    // Halkii API Key-ga. Sidaa darteed, waxaan abuureynaa Dio instance cusub oo aan lahayn header-ka 'X-API-Key'.
+    final adminDio = Dio(
+      BaseOptions(
+        baseUrl: _apiBaseUrl!,
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 15),
+      ),
+    );
+     adminDio.interceptors
+          .add(LogInterceptor(responseBody: false, requestBody: true));
+    return Auth._(adminDio);
   }
 }
 
@@ -104,7 +130,8 @@ class Query {
   }) : _queryParameters = queryParameters ?? {};
 
   /// Creates a new query with an additional filter.
-  Query where(String field, {
+  Query where(
+    String field, {
     dynamic isEqualTo,
     dynamic isNotEqualTo,
     dynamic isGreaterThan,
@@ -118,8 +145,10 @@ class Query {
     if (isNotEqualTo != null) whereClauses.add('$field,!=,$isNotEqualTo');
     if (isGreaterThan != null) whereClauses.add('$field,>,$isGreaterThan');
     if (isLessThan != null) whereClauses.add('$field,<,$isLessThan');
-    if (isGreaterThanOrEqualTo != null) whereClauses.add('$field,>=,$isGreaterThanOrEqualTo');
-    if (isLessThanOrEqualTo != null) whereClauses.add('$field,<=,$isLessThanOrEqualTo');
+    if (isGreaterThanOrEqualTo != null)
+      whereClauses.add('$field,>=,$isGreaterThanOrEqualTo');
+    if (isLessThanOrEqualTo != null)
+      whereClauses.add('$field,<=,$isLessThanOrEqualTo');
     newParams['where'] = whereClauses;
     return Query(dio: dio, path: path, queryParameters: newParams);
   }
@@ -130,7 +159,7 @@ class Query {
     newParams['orderBy'] = '$field,${descending ? 'desc' : 'asc'}';
     return Query(dio: dio, path: path, queryParameters: newParams);
   }
-  
+
   /// Creates a new query with a document limit.
   Query limit(int count) {
     final newParams = Map<String, dynamic>.from(_queryParameters);
@@ -158,15 +187,18 @@ class CollectionReference extends Query {
 
   /// Returns a [DocumentReference] for the specified [documentId].
   DocumentReference document(String documentId) {
-    return DocumentReference(dio: dio, collectionPath: path, documentId: documentId);
+    return DocumentReference(
+        dio: dio, collectionPath: path, documentId: documentId);
   }
 
   /// Adds a new document with a server-generated ID to this collection.
   Future<DocumentReference> add(Map<String, dynamic> data) async {
     try {
-      final response = await dio.post('/firestore/collections/$path/documents', data: data);
+      final response =
+          await dio.post('/firestore/collections/$path/documents', data: data);
       final newDocId = response.data['id'];
-      return DocumentReference(dio: dio, collectionPath: path, documentId: newDocId);
+      return DocumentReference(
+          dio: dio, collectionPath: path, documentId: newDocId);
     } on DioException catch (e) {
       throw _handleDioError(e, 'Failed to create document');
     }
@@ -178,13 +210,17 @@ class DocumentReference {
   final Dio dio;
   final String collectionPath;
   final String documentId;
-  DocumentReference({required this.dio, required this.collectionPath, required this.documentId});
+  DocumentReference(
+      {required this.dio,
+      required this.collectionPath,
+      required this.documentId});
 
   String get id => documentId;
 
   Future<void> delete() async {
     try {
-      await dio.delete('/firestore/collections/$collectionPath/documents/$documentId');
+      await dio
+          .delete('/firestore/collections/$collectionPath/documents/$documentId');
     } on DioException catch (e) {
       throw _handleDioError(e, 'Failed to delete document');
     }
@@ -202,7 +238,8 @@ class DocumentReference {
   }
 
   Future<DocumentSnapshot> get() async {
-    throw UnimplementedError('get() on a document is not yet supported on the backend.');
+    throw UnimplementedError(
+        'get() on a document is not yet supported on the backend.');
   }
 
   CollectionReference collection(String subCollectionId) {
@@ -219,7 +256,8 @@ class QuerySnapshot {
 
   factory QuerySnapshot.fromResponse(Response response) {
     final List<dynamic> data = (response.data as List<dynamic>?) ?? [];
-    final docs = data.map((docData) => DocumentSnapshot.fromMap(docData)).toList();
+    final docs =
+        data.map((docData) => DocumentSnapshot.fromMap(docData)).toList();
     return QuerySnapshot(docs: docs);
   }
 }
@@ -247,9 +285,10 @@ class RealtimeDatabase {
   final StreamController<RealtimeSnapshot> _streamController;
   Timer? _reconnectTimer;
   bool _isConnected = false;
-  
-  RealtimeDatabase._internal({required this.wsUrl}) : _streamController = StreamController.broadcast();
-  
+
+  RealtimeDatabase._internal({required this.wsUrl})
+      : _streamController = StreamController.broadcast();
+
   void _connect() {
     if (_isConnected) return;
     print("🔌 [RTDB] Connecting to: $wsUrl");
@@ -266,7 +305,8 @@ class RealtimeDatabase {
               _streamController.add(RealtimeSnapshot.fromJson(decoded));
             }
           } catch (e) {
-             _streamController.addError(Exception('Failed to parse server message: $e'));
+            _streamController
+                .addError(Exception('Failed to parse server message: $e'));
           }
         },
         onDone: () {
@@ -292,7 +332,7 @@ class RealtimeDatabase {
 
   void _tryReconnect() {
     if (!_isConnected) {
-       _reconnectTimer?.cancel();
+      _reconnectTimer?.cancel();
       _reconnectTimer = Timer(const Duration(seconds: 5), () {
         print("🔄 [RTDB] Attempting to reconnect...");
         _connect();
@@ -324,7 +364,8 @@ class DatabaseReference {
 
   Stream<RealtimeSnapshot> onValue() {
     _sendMessage({'type': 'subscribe', 'path': path});
-    return db._streamController.stream.where((snapshot) => snapshot.path == path);
+    return db._streamController.stream
+        .where((snapshot) => snapshot.path == path);
   }
 
   DatabaseReference push() {
@@ -335,11 +376,11 @@ class DatabaseReference {
   Future<void> update(Map<String, dynamic> data) async {
     _sendMessage({'type': 'update', 'path': path, 'payload': data});
   }
-  
+
   Future<void> set(dynamic data) async {
     _sendMessage({'type': 'set', 'path': path, 'payload': data});
   }
-  
+
   Future<void> remove() async {
     await set(null);
   }
@@ -369,8 +410,132 @@ class RealtimeSnapshot {
   }
 }
 
+
 //==============================================================================
-// Qaybta 4: Error Handling Helper
+// ✅✅✅ QAYBTA 4: AUTH (CUSUB) - Maareynta User-ka (Admin/Developer) ✅✅✅
+//==============================================================================
+
+/// The entry point for all administrative authentication operations.
+/// This class is intended for server-side or admin panel usage, where you have
+/// a developer's JWT token, not for client-side user login.
+class Auth {
+  final Dio _dio;
+
+  Auth._(this._dio);
+
+  /// Returns a reference to the user management functions for a specific project.
+  ProjectAuth project(String projectId, {required String developerAuthToken}) {
+    // Ku dar token-ka developer-ka header-ka codsi kasta oo la diro.
+    _dio.options.headers['Authorization'] = 'Bearer $developerAuthToken';
+    return ProjectAuth._(projectId: projectId, dio: _dio);
+  }
+}
+
+
+/// A reference to the authentication features of a specific project.
+/// Allows you to manage users (list, create, update, delete).
+class ProjectAuth {
+  final String projectId;
+  final Dio dio;
+
+  ProjectAuth._({required this.projectId, required this.dio});
+
+  /// Creates a new user in the project.
+  ///
+  /// Requires `email`, `password`, and `fullName`.
+  Future<AuthUser> createUser({
+    required String email,
+    required String password,
+    required String fullName,
+  }) async {
+    try {
+      final response = await dio.post(
+        '/projects/$projectId/users',
+        data: {
+          'email': email,
+          'password': password,
+          'full_name': fullName,
+        },
+      );
+      return AuthUser.fromJson(response.data);
+    } on DioException catch (e) {
+      throw _handleDioError(e, 'Failed to create user');
+    }
+  }
+
+  /// Deletes a user by their unique [userId].
+  Future<void> deleteUser(String userId) async {
+    try {
+      await dio.delete('/projects/$projectId/users/$userId');
+    } on DioException catch (e) {
+      throw _handleDioError(e, 'Failed to delete user');
+    }
+  }
+
+  /// Updates a user's `fullName`.
+  Future<AuthUser> updateUser({
+    required String userId,
+    required String fullName,
+  }) async {
+    try {
+      final response = await dio.put(
+        '/projects/$projectId/users/$userId',
+        data: {'full_name': fullName},
+      );
+      return AuthUser.fromJson(response.data);
+    } on DioException catch (e) {
+      throw _handleDioError(e, 'Failed to update user');
+    }
+  }
+
+  /// Retrieves a list of all users in the project.
+  Future<List<AuthUser>> listUsers() async {
+    try {
+      final response = await dio.get('/projects/$projectId/users');
+      final List<dynamic> data = response.data ?? [];
+      return data.map((json) => AuthUser.fromJson(json)).toList();
+    } on DioException catch (e) {
+      throw _handleDioError(e, 'Failed to list users');
+    }
+  }
+}
+
+/// Represents a user in the Happy Platform authentication system.
+class AuthUser {
+  final String id;
+  final String email;
+  final String fullName;
+  final String? photoUrl;
+  final String provider;
+  final DateTime? lastLogin;
+  final DateTime createdAt;
+
+  AuthUser({
+    required this.id,
+    required this.email,
+    required this.fullName,
+    this.photoUrl,
+    required this.provider,
+    this.lastLogin,
+    required this.createdAt,
+  });
+
+  factory AuthUser.fromJson(Map<String, dynamic> json) {
+    return AuthUser(
+      id: json['id'],
+      email: json['email'],
+      fullName: json['full_name'],
+      photoUrl: json['photo_url'],
+      provider: json['provider'],
+      lastLogin: json['last_login'] != null ? DateTime.parse(json['last_login']) : null,
+      createdAt: DateTime.parse(json['created_at']),
+    );
+  }
+}
+
+
+//==============================================================================
+// Qaybta 5: Error Handling Helper (Hore ayuu u jiray, hadda waa qaybta 5-aad)
 //==============================================================================
 
 String _handleDioError(DioException e, String defaultMessage) {

@@ -1,3 +1,21 @@
+0.5.0
+
+BIG FEATURE: Added support for Auth service for managing project users.
+
+Introduced HappyPlatform.auth() to access the new authentication service.
+
+Added ProjectAuth class that requires projectId and developerAuthToken (JWT).
+
+Features include:
+
+createUser() – Add new user with email, password, and full name.
+
+listUsers() – Fetch all users in a project.
+
+updateUser() – Update user details by ID.
+
+deleteUser() – Delete a user by ID.
+
 0.4.0
 
 BIG FEATURE: Added support for Realtime Database via WebSockets.
@@ -40,6 +58,7 @@ Simplified the internal Dio instance management for better multi-project support
 
 Initial release of the Happy Platform SDK.
 
-Supports full CRUD operations (Create, Read, Update, Delete).
+Supports basic CRUD operations (Create, Read, Update, Delete).
 
 Provides a simple, fluent API for interacting with your Happy Platform backend.
+
