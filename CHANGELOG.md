@@ -1,3 +1,7 @@
+0.7.0
+
+last update
+
 0.6.0
 
 Updated auth

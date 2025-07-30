@@ -429,14 +429,15 @@ class Auth {
   /// This is a public method that any app user can call.
   /// Throws [AuthException] if registration fails.
   Future<AuthUser> registerWithEmailAndPassword({
+    required String projectId, // <-- WAA IN LAGU DARAA
     required String fullName,
     required String email,
     required String password,
   }) async {
     try {
-      // Endpoint-kan waa inuu yahay mid public ah oo ku shaqeeya API Key
+      // ✅✅✅ ISTICMAAL JIDKA SAXDA AH EE BACKEND-KA ✅✅✅
       final response = await _dio.post(
-        '/register', // Endpoint-kani waa inuu noqdaa mid fudud: `/projects/{projectId}/register`
+        '/projects/$projectId/register', 
         data: {
           'full_name': fullName,
           'email': email,
@@ -451,23 +452,23 @@ class Auth {
 
   /// Signs in a user with their email and password.
   ///
-  /// Returns the signed-in user's data.
-  /// Throws [AuthException] if sign-in fails (e.g., wrong password).
+  /// Requires the `projectId`.
+  /// Throws [AuthException] if sign-in fails.
   Future<AuthUser> signInWithEmailAndPassword({
+    required String projectId, // <-- WAA IN LAGU DARAA
     required String email,
     required String password,
   }) async {
     try {
-      // Endpoint-kan waa inuu yahay mid public ah oo ku shaqeeya API Key
+      // ✅✅✅ ISTICMAAL JIDKA SAXDA AH EE BACKEND-KA ✅✅✅
       final response = await _dio.post(
-        '/login', // Endpoint-kani waa inuu noqdaa mid fudud: `/projects/{projectId}/login`
+        '/projects/$projectId/login',
         data: {
           'email': email,
           'password': password,
         },
       );
-       // Waxaan u qaadanaynaa in backend-ku soo celinayo user object oo dhammaystiran
-      return AuthUser.fromJson(response.data['user'] ?? response.data);
+       return AuthUser.fromJson(response.data['user'] ?? response.data);
     } on DioException catch (e) {
       throw AuthException.fromDioException(e);
     }
@@ -603,3 +604,4 @@ String _handleDioError(DioException e, String defaultMessage) {
   }
   return e.message ?? defaultMessage;
 }
+
