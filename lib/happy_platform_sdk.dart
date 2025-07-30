@@ -84,21 +84,10 @@ class HappyPlatform {
   /// Returns an instance of the [Auth] service for a specific project.
   /// This is used for managing users from a backend or admin panel, not for client-side login.
   /// If [projectName] is not provided, it defaults to 'default'.
- static Auth auth([String projectName = 'default']) {
+   static Auth auth([String projectName = 'default']) {
     final dio = _dioInstances[projectName];
     if (dio == null) throw Exception('Project "$projectName" not initialized.');
-    // Waxaan u gudbineynaa API key-ga si toos ah, maadaama endpoint-yada auth-ku ay u baahan yihiin developer login
-    // Halkii API Key-ga. Sidaa darteed, waxaan abuureynaa Dio instance cusub oo aan lahayn header-ka 'X-API-Key'.
-    final adminDio = Dio(
-      BaseOptions(
-        baseUrl: _apiBaseUrl!,
-        connectTimeout: const Duration(seconds: 15),
-        receiveTimeout: const Duration(seconds: 15),
-      ),
-    );
-     adminDio.interceptors
-          .add(LogInterceptor(responseBody: false, requestBody: true));
-    return Auth._(adminDio);
+    return Auth._(dio: dio);
   }
 }
 
@@ -412,91 +401,138 @@ class RealtimeSnapshot {
 
 
 //==============================================================================
-// ✅✅✅ QAYBTA 4: AUTH (CUSUB) - Maareynta User-ka (Admin/Developer) ✅✅✅
+// ✅✅✅ QAYBTA 4: AUTH - OO SI BUUXDA DIB LOO HABEEYAY ✅✅✅
 //==============================================================================
 
-/// The entry point for all administrative authentication operations.
-/// This class is intended for server-side or admin panel usage, where you have
-/// a developer's JWT token, not for client-side user login.
+/// The entry point for all authentication operations for a project.
+///
+/// Use this class to:
+/// - Register new users (`registerWithEmailAndPassword`).
+/// - Sign in users (`signInWithEmailAndPassword`).
+/// - Manage users if you have admin privileges (`admin`).
 class Auth {
   final Dio _dio;
-  Auth._(this._dio);
+  Auth._({required Dio dio}) : _dio = dio;
 
-  // ✅✅✅ WAA LA HAGA AJIYAY: Hadda uma baahna 'developerAuthToken' ✅✅✅
-  /// Returns a reference to the user management functions for a specific project.
-  /// The `projectId` is automatically inferred from the initialized API Key.
-  ProjectAuth project(String projectId) {
-    // Si toos ah ayuu u isticmaalayaa Dio-ga leh API Key-ga.
-    return ProjectAuth._(projectId: projectId, dio: _dio);
+  String get _projectId {
+    // Si toos ah uga soo saar `projectId` URL-ka haddii loo baahdo
+    // Laakiin habka ugu fiican waa in backend-ku ka garto API Key-ga.
+    // Hadda, waxaan u qaadanaynaa inaan u baahanahay inaan ku darno `projectId` codsiyada.
+    // Tani waxay u baahan tahay in la helo hab lagu helo.
+    // Xalka ugu fudud: Waa inaan ku darnaa `projectId` marka la wacayo `auth()`
+    // Laakiin aan ka dhigno mid fudud: backend-ku ha aqoonsado.
+    return '';
   }
-}
 
-
-/// A reference to the authentication features of a specific project.
-/// Allows you to manage users (list, create, update, delete).
-class ProjectAuth {
-  final String projectId;
-  final Dio dio;
-
-  ProjectAuth._({required this.projectId, required this.dio});
-
-  /// Creates a new user in the project.
-  Future<AuthUser> createUser({
+  /// Registers a new user with their email, password, and full name.
+  ///
+  /// This is a public method that any app user can call.
+  /// Throws [AuthException] if registration fails.
+  Future<AuthUser> registerWithEmailAndPassword({
+    required String fullName,
     required String email,
     required String password,
-    required String fullName,
   }) async {
     try {
-      final response = await dio.post(
-        '/projects/$projectId/users',
+      // Endpoint-kan waa inuu yahay mid public ah oo ku shaqeeya API Key
+      final response = await _dio.post(
+        '/register', // Endpoint-kani waa inuu noqdaa mid fudud: `/projects/{projectId}/register`
         data: {
+          'full_name': fullName,
           'email': email,
           'password': password,
-          'full_name': fullName,
         },
       );
       return AuthUser.fromJson(response.data);
     } on DioException catch (e) {
-      throw _handleDioError(e, 'Failed to create user');
+      throw AuthException.fromDioException(e);
     }
   }
 
-  /// Deletes a user by their unique [userId].
-  Future<void> deleteUser(String userId) async {
+  /// Signs in a user with their email and password.
+  ///
+  /// Returns the signed-in user's data.
+  /// Throws [AuthException] if sign-in fails (e.g., wrong password).
+  Future<AuthUser> signInWithEmailAndPassword({
+    required String email,
+    required String password,
+  }) async {
     try {
-      await dio.delete('/projects/$projectId/users/$userId');
+      // Endpoint-kan waa inuu yahay mid public ah oo ku shaqeeya API Key
+      final response = await _dio.post(
+        '/login', // Endpoint-kani waa inuu noqdaa mid fudud: `/projects/{projectId}/login`
+        data: {
+          'email': email,
+          'password': password,
+        },
+      );
+       // Waxaan u qaadanaynaa in backend-ku soo celinayo user object oo dhammaystiran
+      return AuthUser.fromJson(response.data['user'] ?? response.data);
     } on DioException catch (e) {
-      throw _handleDioError(e, 'Failed to delete user');
+      throw AuthException.fromDioException(e);
+    }
+  }
+
+  /// Access admin-only functions for user management.
+  ///
+  /// **Important:** This should only be used in a secure server environment
+  /// (like a backend server or admin panel) where you have a developer's
+  /// authentication token. **Do not use this in a client-side application.**
+  UserManagement admin({required String developerAuthToken}) {
+    // Samee Dio instance cusub oo leh token-ka developer-ka
+    final adminDio = Dio(BaseOptions(
+        baseUrl: _dio.options.baseUrl,
+        headers: {'Authorization': 'Bearer $developerAuthToken'}));
+    return UserManagement._(dio: adminDio);
+  }
+}
+
+/// A class for managing users with admin privileges.
+class UserManagement {
+  final Dio _dio;
+  UserManagement._({required Dio dio}) : _dio = dio;
+
+  /// Retrieves a list of all users in the project.
+  Future<List<AuthUser>> listUsers(String projectId) async {
+    try {
+      final response = await _dio.get('/projects/$projectId/users');
+      final List<dynamic> data = response.data ?? [];
+      return data.map((json) => AuthUser.fromJson(json)).toList();
+    } on DioException catch (e) {
+      throw AuthException.fromDioException(e);
     }
   }
 
   /// Updates a user's `fullName`.
   Future<AuthUser> updateUser({
+    required String projectId,
     required String userId,
-    required String fullName,
+    required String newFullName,
   }) async {
-    try {
-      final response = await dio.put(
+     try {
+      final response = await _dio.put(
         '/projects/$projectId/users/$userId',
-        data: {'full_name': fullName},
+        data: {'full_name': newFullName},
       );
       return AuthUser.fromJson(response.data);
     } on DioException catch (e) {
-      throw _handleDioError(e, 'Failed to update user');
+      throw AuthException.fromDioException(e);
     }
   }
 
-  /// Retrieves a list of all users in the project.
-  Future<List<AuthUser>> listUsers() async {
+  /// Deletes a user by their unique [userId].
+  Future<void> deleteUser({
+    required String projectId,
+    required String userId,
+  }) async {
     try {
-      final response = await dio.get('/projects/$projectId/users');
-      final List<dynamic> data = response.data ?? [];
-      return data.map((json) => AuthUser.fromJson(json)).toList();
+      await _dio.delete('/projects/$projectId/users/$userId');
     } on DioException catch (e) {
-      throw _handleDioError(e, 'Failed to list users');
+      throw AuthException.fromDioException(e);
     }
   }
 }
+
 
 /// Represents a user in the Happy Platform authentication system.
 class AuthUser {
@@ -531,7 +567,32 @@ class AuthUser {
   }
 }
 
+/// A custom exception for authentication-related errors.
+/// Provides a clear, user-friendly error message.
+class AuthException implements Exception {
+  final String message;
 
+  AuthException(this.message);
+
+  factory AuthException.fromDioException(DioException e) {
+    if (e.response != null && e.response!.data is Map) {
+      final serverError = e.response!.data['error']?.toString();
+      if (serverError != null) {
+        return AuthException(serverError);
+      }
+    }
+    if (e.type == DioExceptionType.connectionTimeout || e.type == DioExceptionType.sendTimeout || e.type == DioExceptionType.receiveTimeout) {
+      return AuthException("Connection timed out. Please check your internet connection.");
+    }
+    if (e.type == DioExceptionType.unknown) {
+       return AuthException("Network error. Please check your internet connection and try again.");
+    }
+    return AuthException("An unexpected error occurred. Please try again.");
+  }
+  
+  @override
+  String toString() => message;
+}
 //==============================================================================
 // Qaybta 5: Error Handling Helper (Hore ayuu u jiray, hadda waa qaybta 5-aad)
 //==============================================================================

@@ -1,5 +1,9 @@
 0.6.0
 
+Updated auth
+
+0.6.0
+
 Updated authantciation
 
 0.5.0
