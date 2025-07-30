@@ -1,3 +1,7 @@
+0.6.0
+
+Updated authantciation
+
 0.5.0
 
 BIG FEATURE: Added support for Auth service for managing project users.

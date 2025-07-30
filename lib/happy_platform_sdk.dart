@@ -84,7 +84,7 @@ class HappyPlatform {
   /// Returns an instance of the [Auth] service for a specific project.
   /// This is used for managing users from a backend or admin panel, not for client-side login.
   /// If [projectName] is not provided, it defaults to 'default'.
-  static Auth auth([String projectName = 'default']) {
+ static Auth auth([String projectName = 'default']) {
     final dio = _dioInstances[projectName];
     if (dio == null) throw Exception('Project "$projectName" not initialized.');
     // Waxaan u gudbineynaa API key-ga si toos ah, maadaama endpoint-yada auth-ku ay u baahan yihiin developer login
@@ -420,13 +420,13 @@ class RealtimeSnapshot {
 /// a developer's JWT token, not for client-side user login.
 class Auth {
   final Dio _dio;
-
   Auth._(this._dio);
 
+  // ✅✅✅ WAA LA HAGA AJIYAY: Hadda uma baahna 'developerAuthToken' ✅✅✅
   /// Returns a reference to the user management functions for a specific project.
-  ProjectAuth project(String projectId, {required String developerAuthToken}) {
-    // Ku dar token-ka developer-ka header-ka codsi kasta oo la diro.
-    _dio.options.headers['Authorization'] = 'Bearer $developerAuthToken';
+  /// The `projectId` is automatically inferred from the initialized API Key.
+  ProjectAuth project(String projectId) {
+    // Si toos ah ayuu u isticmaalayaa Dio-ga leh API Key-ga.
     return ProjectAuth._(projectId: projectId, dio: _dio);
   }
 }
@@ -441,8 +441,6 @@ class ProjectAuth {
   ProjectAuth._({required this.projectId, required this.dio});
 
   /// Creates a new user in the project.
-  ///
-  /// Requires `email`, `password`, and `fullName`.
   Future<AuthUser> createUser({
     required String email,
     required String password,
