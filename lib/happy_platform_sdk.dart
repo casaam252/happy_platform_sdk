@@ -474,6 +474,21 @@ class Auth {
     }
   }
 
+   // ✅✅✅ KU DAR FUNCTION-KAN CUSUB OO DHAN ✅✅✅
+  /// Fetches a list of all public user profiles in the project.
+  /// This is a public method that uses the initialized API Key.
+  Future<List<AuthUser>> fetchAllUsers({required String projectId}) async {
+    try {
+      // Wuxuu la hadlayaa jidka public-ka ah ee aan backend-ka ka samaynay
+      final response = await _dio.get('/projects/$projectId/users/public');
+      final List<dynamic> data = response.data ?? [];
+      return data.map((json) => AuthUser.fromJson(json)).toList();
+    } on DioException catch (e) {
+      throw AuthException.fromDioException(e);
+    }
+  }
+
+
   /// Access admin-only functions for user management.
   ///
   /// **Important:** This should only be used in a secure server environment
