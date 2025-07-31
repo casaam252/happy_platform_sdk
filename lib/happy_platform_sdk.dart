@@ -219,8 +219,7 @@ class DocumentReference {
       throw _handleDioError(e, 'Failed to set document');
     }
   }
-
-// ✅✅✅ KANI WAA FUNCTION-KA SAXDA AH EE `GET` ✅✅✅
+  // ✅✅✅ KANI WAA FUNCTION-KA SAXDA AH EE `GET` ✅✅✅
   /// Reads the data of the document.
   /// Throws an error if the document does not exist.
   Future<DocumentSnapshot> get() async {
@@ -259,7 +258,22 @@ class DocumentReference {
       throw _handleDioError(e, 'Failed to update document');
     }
   }
+
+
+
+
+   // ✅✅✅ KU SOO CELI FUNCTION-KAN CUSUB OO DHAN ✅✅✅
+  /// Returns a [CollectionReference] to a sub-collection nested under this document.
+  ///
+  /// For example: `firestore.collection('posts').document('postId').collection('comments')`
+  CollectionReference collection(String subCollectionId) {
+    // Samee jidka cusub ee sub-collection-ka
+    final newPath = '$collectionPath/$documentId/$subCollectionId';
+    return CollectionReference(dio: dio, path: newPath);
+  }
+
 }
+
 
 class QuerySnapshot {
   final List<DocumentSnapshot> docs;
