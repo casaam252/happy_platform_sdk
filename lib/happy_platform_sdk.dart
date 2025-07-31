@@ -179,6 +179,7 @@ class CollectionReference extends Query {
     return DocumentReference(
         dio: dio, collectionPath: path, documentId: documentId);
   }
+  
 
   /// Adds a new document with a server-generated ID to this collection.
   Future<DocumentReference> add(Map<String, dynamic> data) async {
@@ -194,86 +195,93 @@ class CollectionReference extends Query {
   }
 }
 
-/// A `DocumentReference` refers to a specific document in a collection.
+// A `DocumentReference` refers to a specific document in a collection.
 class DocumentReference {
   final Dio dio;
   final String collectionPath;
   final String documentId;
-  DocumentReference(
-      {required this.dio,
-      required this.collectionPath,
-      required this.documentId});
 
+  DocumentReference({
+    required this.dio,
+    required this.collectionPath,
+    required this.documentId,
+  });
+
+  /// The unique ID of this document.
   String get id => documentId;
 
-  // ✅✅✅ CUSBOONAYSII UPDATE SI UU U NOQDO SET ✅✅✅
-  // `set` wuxuu abuuraa document-ka haddii uusan jirin, wuu beddelaa haddii uu jiro.
-  Future<void> set(Map<String, dynamic> data) async {
-    try {
-      // `PUT` wuxuu la mid yahay `set`
-      await dio.put(
-        '/firestore/collections/$collectionPath/documents/$documentId',
-        data: data,
-      );
-    } on DioException catch (e) {
-      throw _handleDioError(e, 'Failed to set document');
-    }
-  }
-  // ✅✅✅ KANI WAA FUNCTION-KA SAXDA AH EE `GET` ✅✅✅
-  /// Reads the data of the document.
+  // =========================================================================
+  // ====================> HALKAN WAA XALKA OO DHAN <=========================
+  // Hadda, kani waa isha KELIYA ee runta ah (single source of truth) ee URL-ka.
+  // Dhammaan functions-ka kale waxay isticmaalayaan kan.
+  // =========================================================================
+  String get _documentPath => '/firestore/collections/$collectionPath/documents/$documentId';
+
+  /// Reads the data of the document from the server.
   /// Throws an error if the document does not exist.
   Future<DocumentSnapshot> get() async {
     try {
-      // Backend-kaagu waa inuu taageeraa GET hal document.
-      final response = await dio
-          .get('/firestore/collections/$collectionPath/documents/$documentId');
+      // Isticmaal `_documentPath`
+      final response = await dio.get(_documentPath);
 
-      // Hubi in jawaabtu tahay Map ka hor intaadan u gudbin fromMap
       if (response.data is Map<String, dynamic>) {
         return DocumentSnapshot.fromMap(response.data as Map<String, dynamic>);
       } else {
-        throw Exception("Unexpected response format from server for get()");
+        throw HappyPlatformException("Unexpected response format from server.");
       }
     } on DioException catch (e) {
       throw _handleDioError(e, 'Failed to get document');
     }
   }
 
+  /// Creates a document with the specified data if it does not exist,
+  /// or completely overwrites it if it does.
+  Future<void> set(Map<String, dynamic> data) async {
+    try {
+      // Isticmaal `_documentPath`
+      await dio.put(_documentPath, data: data);
+    } on DioException catch (e) {
+      throw _handleDioError(e, 'Failed to set document');
+    }
+  }
+
+  /// Updates fields in the document.
+  ///
+  /// This method is an alias for `set` because the backend uses `PUT` for both
+
+  Future<void> update(Map<String, dynamic> data) async {
+    try {
+      // `PUT` wuxuu u shaqeeyaa sida "update or create" (upsert),
+      // kaasoo la mid ah `set` ee Firestore. Waa kan ugu habboon xaaladdan.
+      await dio.put(
+        _documentPath,
+        data: data,
+      );
+    } on DioException catch (e) {
+      throw _handleDioError(e, 'Failed to update document data');
+    }
+  }
+  /// Deletes the document from the server.
   Future<void> delete() async {
     try {
-      await dio.delete(
-          '/firestore/collections/$collectionPath/documents/$documentId');
+      // Isticmaal `_documentPath`
+      await dio.delete(_documentPath);
     } on DioException catch (e) {
       throw _handleDioError(e, 'Failed to delete document');
     }
   }
 
-  Future<void> update(Map<String, dynamic> data) async {
-    try {
-      await dio.put(
-        '/firestore/collections/$collectionPath/documents/$documentId',
-        data: data,
-      );
-    } on DioException catch (e) {
-      throw _handleDioError(e, 'Failed to update document');
-    }
-  }
-
-
-
-
    // ✅✅✅ KU SOO CELI FUNCTION-KAN CUSUB OO DHAN ✅✅✅
   /// Returns a [CollectionReference] to a sub-collection nested under this document.
   ///
   /// For example: `firestore.collection('posts').document('postId').collection('comments')`
-  CollectionReference collection(String subCollectionId) {
-    // Samee jidka cusub ee sub-collection-ka
+ CollectionReference collection(String subCollectionId) {
+    // Hadda si sax ah ayuu u dhisayaa jidka sub-collection-ka
     final newPath = '$collectionPath/$documentId/$subCollectionId';
     return CollectionReference(dio: dio, path: newPath);
   }
 
 }
-
 
 class QuerySnapshot {
   final List<DocumentSnapshot> docs;
@@ -655,9 +663,18 @@ class AuthException implements Exception {
 // Qaybta 5: Error Handling Helper (Hore ayuu u jiray, hadda waa qaybta 5-aad)
 //==============================================================================
 
-String _handleDioError(DioException e, String defaultMessage) {
+// Waa fiican tahay inaad lahaato exception u gaar ah SDK-ga
+class HappyPlatformException implements Exception {
+  final String message;
+  HappyPlatformException(this.message);
+  @override
+  String toString() => message;
+}
+
+// Helper function la wadaagi karo
+HappyPlatformException _handleDioError(DioException e, String defaultMessage) {
   if (e.response != null && e.response!.data is Map) {
-    return e.response!.data['error']?.toString() ?? defaultMessage;
+    return HappyPlatformException(e.response!.data['error'] ?? defaultMessage);
   }
-  return e.message ?? defaultMessage;
+  return HappyPlatformException(e.message ?? defaultMessage);
 }
