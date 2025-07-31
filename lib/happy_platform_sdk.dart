@@ -84,7 +84,7 @@ class HappyPlatform {
   /// Returns an instance of the [Auth] service for a specific project.
   /// This is used for managing users from a backend or admin panel, not for client-side login.
   /// If [projectName] is not provided, it defaults to 'default'.
-   static Auth auth([String projectName = 'default']) {
+  static Auth auth([String projectName = 'default']) {
     final dio = _dioInstances[projectName];
     if (dio == null) throw Exception('Project "$projectName" not initialized.');
     return Auth._(dio: dio);
@@ -206,10 +206,44 @@ class DocumentReference {
 
   String get id => documentId;
 
+  // ✅✅✅ CUSBOONAYSII UPDATE SI UU U NOQDO SET ✅✅✅
+  // `set` wuxuu abuuraa document-ka haddii uusan jirin, wuu beddelaa haddii uu jiro.
+  Future<void> set(Map<String, dynamic> data) async {
+    try {
+      // `PUT` wuxuu la mid yahay `set`
+      await dio.put(
+        '/firestore/collections/$collectionPath/documents/$documentId',
+        data: data,
+      );
+    } on DioException catch (e) {
+      throw _handleDioError(e, 'Failed to set document');
+    }
+  }
+
+// ✅✅✅ KANI WAA FUNCTION-KA SAXDA AH EE `GET` ✅✅✅
+  /// Reads the data of the document.
+  /// Throws an error if the document does not exist.
+  Future<DocumentSnapshot> get() async {
+    try {
+      // Backend-kaagu waa inuu taageeraa GET hal document.
+      final response = await dio
+          .get('/firestore/collections/$collectionPath/documents/$documentId');
+
+      // Hubi in jawaabtu tahay Map ka hor intaadan u gudbin fromMap
+      if (response.data is Map<String, dynamic>) {
+        return DocumentSnapshot.fromMap(response.data as Map<String, dynamic>);
+      } else {
+        throw Exception("Unexpected response format from server for get()");
+      }
+    } on DioException catch (e) {
+      throw _handleDioError(e, 'Failed to get document');
+    }
+  }
+
   Future<void> delete() async {
     try {
-      await dio
-          .delete('/firestore/collections/$collectionPath/documents/$documentId');
+      await dio.delete(
+          '/firestore/collections/$collectionPath/documents/$documentId');
     } on DioException catch (e) {
       throw _handleDioError(e, 'Failed to delete document');
     }
@@ -224,16 +258,6 @@ class DocumentReference {
     } on DioException catch (e) {
       throw _handleDioError(e, 'Failed to update document');
     }
-  }
-
-  Future<DocumentSnapshot> get() async {
-    throw UnimplementedError(
-        'get() on a document is not yet supported on the backend.');
-  }
-
-  CollectionReference collection(String subCollectionId) {
-    final newPath = '$collectionPath/$documentId/$subCollectionId';
-    return CollectionReference(dio: dio, path: newPath);
   }
 }
 
@@ -359,7 +383,8 @@ class DatabaseReference {
 
   DatabaseReference push() {
     final newId = const Uuid().v4();
-    return DatabaseReference(db: db, path: path == '/' ? newId : '$path/$newId');
+    return DatabaseReference(
+        db: db, path: path == '/' ? newId : '$path/$newId');
   }
 
   Future<void> update(Map<String, dynamic> data) async {
@@ -399,7 +424,6 @@ class RealtimeSnapshot {
   }
 }
 
-
 //==============================================================================
 // ✅✅✅ QAYBTA 4: AUTH - OO SI BUUXDA DIB LOO HABEEYAY ✅✅✅
 //==============================================================================
@@ -437,7 +461,7 @@ class Auth {
     try {
       // ✅✅✅ ISTICMAAL JIDKA SAXDA AH EE BACKEND-KA ✅✅✅
       final response = await _dio.post(
-        '/projects/$projectId/register', 
+        '/projects/$projectId/register',
         data: {
           'full_name': fullName,
           'email': email,
@@ -468,13 +492,13 @@ class Auth {
           'password': password,
         },
       );
-       return AuthUser.fromJson(response.data['user'] ?? response.data);
+      return AuthUser.fromJson(response.data['user'] ?? response.data);
     } on DioException catch (e) {
       throw AuthException.fromDioException(e);
     }
   }
 
-   // ✅✅✅ KU DAR FUNCTION-KAN CUSUB OO DHAN ✅✅✅
+  // ✅✅✅ KU DAR FUNCTION-KAN CUSUB OO DHAN ✅✅✅
   /// Fetches a list of all public user profiles in the project.
   /// This is a public method that uses the initialized API Key.
   Future<List<AuthUser>> fetchAllUsers({required String projectId}) async {
@@ -487,7 +511,6 @@ class Auth {
       throw AuthException.fromDioException(e);
     }
   }
-
 
   /// Access admin-only functions for user management.
   ///
@@ -525,7 +548,7 @@ class UserManagement {
     required String userId,
     required String newFullName,
   }) async {
-     try {
+    try {
       final response = await _dio.put(
         '/projects/$projectId/users/$userId',
         data: {'full_name': newFullName},
@@ -548,7 +571,6 @@ class UserManagement {
     }
   }
 }
-
 
 /// Represents a user in the Happy Platform authentication system.
 class AuthUser {
@@ -577,7 +599,9 @@ class AuthUser {
       fullName: json['full_name'],
       photoUrl: json['photo_url'],
       provider: json['provider'],
-      lastLogin: json['last_login'] != null ? DateTime.parse(json['last_login']) : null,
+      lastLogin: json['last_login'] != null
+          ? DateTime.parse(json['last_login'])
+          : null,
       createdAt: DateTime.parse(json['created_at']),
     );
   }
@@ -597,15 +621,19 @@ class AuthException implements Exception {
         return AuthException(serverError);
       }
     }
-    if (e.type == DioExceptionType.connectionTimeout || e.type == DioExceptionType.sendTimeout || e.type == DioExceptionType.receiveTimeout) {
-      return AuthException("Connection timed out. Please check your internet connection.");
+    if (e.type == DioExceptionType.connectionTimeout ||
+        e.type == DioExceptionType.sendTimeout ||
+        e.type == DioExceptionType.receiveTimeout) {
+      return AuthException(
+          "Connection timed out. Please check your internet connection.");
     }
     if (e.type == DioExceptionType.unknown) {
-       return AuthException("Network error. Please check your internet connection and try again.");
+      return AuthException(
+          "Network error. Please check your internet connection and try again.");
     }
     return AuthException("An unexpected error occurred. Please try again.");
   }
-  
+
   @override
   String toString() => message;
 }
@@ -619,4 +647,3 @@ String _handleDioError(DioException e, String defaultMessage) {
   }
   return e.message ?? defaultMessage;
 }
-
