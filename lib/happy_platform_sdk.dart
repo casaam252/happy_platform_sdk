@@ -10,7 +10,6 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 //==============================================================================
 // Qaybta 1: Entry Point & Initialization
 //==============================================================================
-
 /// The main class for interacting with the Happy Platform SDK.
 class HappyPlatform {
   static final HappyPlatform _instance = HappyPlatform._internal();
@@ -41,31 +40,38 @@ class HappyPlatform {
           receiveTimeout: const Duration(seconds: 15),
         ),
       );
-      dio.interceptors
-          .add(LogInterceptor(responseBody: false, requestBody: true));
+      dio.interceptors.add(LogInterceptor(responseBody: true, requestBody: true));
       _dioInstances[projectName] = dio;
     });
     print(
         "✅ Happy Platform SDK Initialized for ${projects.length} project(s).");
   }
 
+  /// Returns an instance of the [Auth] service for a specific project.
+  static Auth auth([String projectName = 'default']) {
+    final dio = _dioInstances[projectName];
+    if (dio == null) throw Exception('Project "$projectName" not initialized.');
+    return Auth._(dio: dio);
+  }
+
   /// Returns an instance of the [Firestore] service for a specific project.
-  /// If [projectName] is not provided, it defaults to 'default'.
   static Firestore firestore([String projectName = 'default']) {
     final dio = _dioInstances[projectName];
     if (dio == null) throw Exception('Project "$projectName" not initialized.');
-    return Firestore(dio: dio);
+    if (_apiBaseUrl == null) throw Exception('SDK not initialized. Missing API base URL.');
+    
+    // Si sax ah u samee `wsUrl`
+    final wsUrl = _apiBaseUrl!.replaceFirst('http', 'ws').replaceFirst('/api/v1', '');
+    return Firestore(dio: dio, webSocketUrl: wsUrl);
   }
 
   /// Returns a persistent instance of the [RealtimeDatabase] service for a specific project.
-  /// If [projectName] is not provided, it defaults to 'default'.
   static RealtimeDatabase realtimeDatabase([String projectName = 'default']) {
     if (_realtimeInstances.containsKey(projectName)) {
       final instance = _realtimeInstances[projectName]!;
-      instance.goOnline(); // Hubi inuu `connected` yahay
+      instance.goOnline();
       return instance;
     }
-
     final dio = _dioInstances[projectName];
     final apiKey = dio?.options.headers['X-API-Key'];
     if (_apiBaseUrl == null || apiKey == null) {
@@ -73,242 +79,282 @@ class HappyPlatform {
     }
     final wsUrl =
         _apiBaseUrl!.replaceFirst('http', 'ws').replaceFirst('/api/v1', '');
-
     final newInstance =
         RealtimeDatabase._internal(wsUrl: '$wsUrl/ws?apiKey=$apiKey');
     _realtimeInstances[projectName] = newInstance;
     return newInstance;
   }
-
-  // ✅✅✅ QAYBTA CUSUB EE LAGU DARAY ✅✅✅
-  /// Returns an instance of the [Auth] service for a specific project.
-  /// This is used for managing users from a backend or admin panel, not for client-side login.
-  /// If [projectName] is not provided, it defaults to 'default'.
-  static Auth auth([String projectName = 'default']) {
-    final dio = _dioInstances[projectName];
-    if (dio == null) throw Exception('Project "$projectName" not initialized.');
-    return Auth._(dio: dio);
-  }
 }
-
 //==============================================================================
 // Qaybta 2: Firestore
 //==============================================================================
-
 /// The entry point for all Firestore operations.
 class Firestore {
   final Dio dio;
-  Firestore({required this.dio});
+  final String webSocketUrl;
 
-  /// Returns a [CollectionReference] for the specified [collectionId].
-  CollectionReference collection(String collectionId) {
-    return CollectionReference(dio: dio, path: collectionId);
+  Firestore({required this.dio, required this.webSocketUrl});
+
+  CollectionReference<Map<String, dynamic>> collection(String collectionId) {
+    return CollectionReference<Map<String, dynamic>>(
+      dio: dio,
+      path: collectionId,
+      webSocketUrl: webSocketUrl,
+    );
   }
 }
 
-/// A `Query` refers to a query across a collection of documents.
-class Query {
+class Query<T> {
   final Dio dio;
   final String path;
+  final String webSocketUrl;
   final Map<String, dynamic> _queryParameters;
+  final T Function(DocumentSnapshot<T>, SnapshotOptions?)? fromFirestore;
+  final Map<String, dynamic> Function(T, SetOptions?)? toFirestore;
 
   Query({
     required this.dio,
     required this.path,
+    required this.webSocketUrl,
     Map<String, dynamic>? queryParameters,
+    this.fromFirestore,
+    this.toFirestore,
   }) : _queryParameters = queryParameters ?? {};
 
-  /// Creates a new query with an additional filter.
-  Query where(
-    String field, {
-    dynamic isEqualTo,
-    dynamic isNotEqualTo,
-    dynamic isGreaterThan,
-    dynamic isLessThan,
-    dynamic isGreaterThanOrEqualTo,
-    dynamic isLessThanOrEqualTo,
-  }) {
+  Query<T> where(String field, {dynamic isEqualTo, dynamic isNotEqualTo}) {
     final newParams = Map<String, dynamic>.from(_queryParameters);
     List<String> whereClauses = List<String>.from(newParams['where'] ?? []);
     if (isEqualTo != null) whereClauses.add('$field,==,$isEqualTo');
     if (isNotEqualTo != null) whereClauses.add('$field,!=,$isNotEqualTo');
-    if (isGreaterThan != null) whereClauses.add('$field,>,$isGreaterThan');
-    if (isLessThan != null) whereClauses.add('$field,<,$isLessThan');
-    if (isGreaterThanOrEqualTo != null)
-      whereClauses.add('$field,>=,$isGreaterThanOrEqualTo');
-    if (isLessThanOrEqualTo != null)
-      whereClauses.add('$field,<=,$isLessThanOrEqualTo');
     newParams['where'] = whereClauses;
-    return Query(dio: dio, path: path, queryParameters: newParams);
+    return Query<T>(dio: dio, path: path, webSocketUrl: webSocketUrl, queryParameters: newParams, fromFirestore: fromFirestore, toFirestore: toFirestore);
   }
 
-  /// Creates a new query with an ordering constraint.
-  Query orderBy(String field, {bool descending = false}) {
+  Query<T> orderBy(String field, {bool descending = false}) {
     final newParams = Map<String, dynamic>.from(_queryParameters);
     newParams['orderBy'] = '$field,${descending ? 'desc' : 'asc'}';
-    return Query(dio: dio, path: path, queryParameters: newParams);
+    return Query<T>(dio: dio, path: path, webSocketUrl: webSocketUrl, queryParameters: newParams, fromFirestore: fromFirestore, toFirestore: toFirestore);
   }
 
-  /// Creates a new query with a document limit.
-  Query limit(int count) {
+  Query<T> limit(int count) {
     final newParams = Map<String, dynamic>.from(_queryParameters);
     newParams['limit'] = count;
-    return Query(dio: dio, path: path, queryParameters: newParams);
+    return Query<T>(dio: dio, path: path, webSocketUrl: webSocketUrl, queryParameters: newParams, fromFirestore: fromFirestore, toFirestore: toFirestore);
   }
 
-  /// Executes the query and returns a [QuerySnapshot].
-  Future<QuerySnapshot> get() async {
+  Future<QuerySnapshot<T>> get() async {
     try {
-      final response = await dio.get(
-        '/firestore/collections/$path/documents',
-        queryParameters: _queryParameters,
-      );
-      return QuerySnapshot.fromResponse(response);
+      final response = await dio.get('/firestore/collections/$path/documents', queryParameters: _queryParameters);
+      return QuerySnapshot<T>.fromResponse(response, fromFirestore);
     } on DioException catch (e) {
       throw _handleDioError(e, 'Failed to get documents');
     }
   }
 }
 
-/// A `CollectionReference` is a `Query` that can also be used to add new documents.
-class CollectionReference extends Query {
-  CollectionReference({required super.dio, required super.path});
+class CollectionReference<T> extends Query<T> {
+  CollectionReference({
+    required super.dio,
+    required super.path,
+    required super.webSocketUrl,
+    super.fromFirestore,
+    super.toFirestore,
+  });
 
-  /// Returns a [DocumentReference] for the specified [documentId].
-  DocumentReference document(String documentId) {
-    return DocumentReference(
-        dio: dio, collectionPath: path, documentId: documentId);
+  DocumentReference<T> document(String documentId) {
+    return DocumentReference<T>(dio: dio, collectionPath: path, documentId: documentId, webSocketUrl: webSocketUrl, fromFirestore: fromFirestore, toFirestore: toFirestore);
   }
-  
 
-  /// Adds a new document with a server-generated ID to this collection.
-  Future<DocumentReference> add(Map<String, dynamic> data) async {
+  Future<DocumentReference<T>> add(T data) async {
     try {
-      final response =
-          await dio.post('/firestore/collections/$path/documents', data: data);
+      if (toFirestore == null) throw Exception('toFirestore converter is required to add typed data.');
+      final mapData = toFirestore!(data, null);
+      final response = await dio.post('/firestore/collections/$path/documents', data: mapData);
       final newDocId = response.data['id'];
-      return DocumentReference(
-          dio: dio, collectionPath: path, documentId: newDocId);
+      return DocumentReference<T>(dio: dio, collectionPath: path, documentId: newDocId, webSocketUrl: webSocketUrl, fromFirestore: fromFirestore, toFirestore: toFirestore);
     } on DioException catch (e) {
       throw _handleDioError(e, 'Failed to create document');
     }
   }
+
+  CollectionReference<R> withConverter<R>({
+    required R Function(DocumentSnapshot<R> snapshot, SnapshotOptions? options) fromFirestore,
+    required Map<String, dynamic> Function(R value, SetOptions? options) toFirestore,
+  }) {
+    return CollectionReference<R>(dio: dio, path: path, webSocketUrl: webSocketUrl, fromFirestore: fromFirestore, toFirestore: toFirestore);
+  }
 }
 
-// A `DocumentReference` refers to a specific document in a collection.
-class DocumentReference {
+class DocumentReference<T> {
   final Dio dio;
   final String collectionPath;
   final String documentId;
+  final String webSocketUrl;
+  final T Function(DocumentSnapshot<T>, SnapshotOptions?)? fromFirestore;
+  final Map<String, dynamic> Function(T, SetOptions?)? toFirestore;
 
   DocumentReference({
     required this.dio,
     required this.collectionPath,
     required this.documentId,
+    required this.webSocketUrl,
+    this.fromFirestore,
+    this.toFirestore,
   });
 
-  /// The unique ID of this document.
   String get id => documentId;
-
-  // =========================================================================
-  // ====================> HALKAN WAA XALKA OO DHAN <=========================
-  // Hadda, kani waa isha KELIYA ee runta ah (single source of truth) ee URL-ka.
-  // Dhammaan functions-ka kale waxay isticmaalayaan kan.
-  // =========================================================================
   String get _documentPath => '/firestore/collections/$collectionPath/documents/$documentId';
 
-  /// Reads the data of the document from the server.
-  /// Throws an error if the document does not exist.
-  Future<DocumentSnapshot> get() async {
+  Future<DocumentSnapshot<T>> get() async {
     try {
-      // Isticmaal `_documentPath`
       final response = await dio.get(_documentPath);
-
-      if (response.data is Map<String, dynamic>) {
-        return DocumentSnapshot.fromMap(response.data as Map<String, dynamic>);
-      } else {
-        throw HappyPlatformException("Unexpected response format from server.");
-      }
+      return DocumentSnapshot<T>.fromResponse(response, fromFirestore);
     } on DioException catch (e) {
+      if (e.response?.statusCode == 404) {
+        return DocumentSnapshot<T>(id: documentId, dataMap: null, fromFirestore: fromFirestore);
+      }
       throw _handleDioError(e, 'Failed to get document');
     }
   }
 
-  /// Creates a document with the specified data if it does not exist,
-  /// or completely overwrites it if it does.
-  Future<void> set(Map<String, dynamic> data) async {
+  Future<void> set(T data, [SetOptions? options]) async {
     try {
-      // Isticmaal `_documentPath`
-      await dio.put(_documentPath, data: data);
+      if (toFirestore == null) throw Exception('toFirestore converter is required to set typed data.');
+      final mapData = toFirestore!(data, options);
+      await dio.put(_documentPath, data: mapData);
     } on DioException catch (e) {
       throw _handleDioError(e, 'Failed to set document');
     }
   }
 
-  /// Updates fields in the document.
-  ///
-  /// This method is an alias for `set` because the backend uses `PUT` for both
-
-  Future<void> update(Map<String, dynamic> data) async {
+  Future<void> update(Map<String, Object?> data) async {
     try {
-      // `PUT` wuxuu u shaqeeyaa sida "update or create" (upsert),
-      // kaasoo la mid ah `set` ee Firestore. Waa kan ugu habboon xaaladdan.
-      await dio.put(
-        _documentPath,
-        data: data,
-      );
+      await dio.patch(_documentPath, data: data);
     } on DioException catch (e) {
       throw _handleDioError(e, 'Failed to update document data');
     }
   }
-  /// Deletes the document from the server.
+
   Future<void> delete() async {
     try {
-      // Isticmaal `_documentPath`
       await dio.delete(_documentPath);
     } on DioException catch (e) {
       throw _handleDioError(e, 'Failed to delete document');
     }
   }
 
-   // ✅✅✅ KU SOO CELI FUNCTION-KAN CUSUB OO DHAN ✅✅✅
-  /// Returns a [CollectionReference] to a sub-collection nested under this document.
-  ///
-  /// For example: `firestore.collection('posts').document('postId').collection('comments')`
- CollectionReference collection(String subCollectionId) {
-    // Hadda si sax ah ayuu u dhisayaa jidka sub-collection-ka
-    final newPath = '$collectionPath/$documentId/$subCollectionId';
-    return CollectionReference(dio: dio, path: newPath);
+  Stream<DocumentSnapshot<T>> snapshots() {
+    final streamController = StreamController<DocumentSnapshot<T>>();
+    late WebSocketChannel channel;
+    void connect() {
+      try {
+        final wsPath = '$webSocketUrl$_documentPath';
+        channel = WebSocketChannel.connect(Uri.parse(wsPath));
+        channel.stream.listen(
+          (message) {
+            final data = json.decode(message) as Map<String, dynamic>;
+            streamController.add(DocumentSnapshot<T>.fromMap(data, fromFirestore));
+          },
+          onDone: () => connect(),
+          onError: (error) { streamController.addError(error); connect(); },
+        );
+      } catch (e) {
+        streamController.addError(e);
+      }
+    }
+    connect();
+    streamController.onCancel = () => channel.sink.close();
+    return streamController.stream;
   }
-
 }
 
-class QuerySnapshot {
-  final List<DocumentSnapshot> docs;
+class QuerySnapshot<T> {
+  final List<DocumentSnapshot<T>> docs;
   int get size => docs.length;
   bool get isEmpty => docs.isEmpty;
+
   QuerySnapshot({required this.docs});
 
-  factory QuerySnapshot.fromResponse(Response response) {
-    final List<dynamic> data = (response.data as List<dynamic>?) ?? [];
-    final docs =
-        data.map((docData) => DocumentSnapshot.fromMap(docData)).toList();
-    return QuerySnapshot(docs: docs);
+  factory QuerySnapshot.fromResponse(
+      Response response, T Function(DocumentSnapshot<T>, SnapshotOptions?)? fromFirestore) {
+    final List<dynamic> dataList = (response.data as List<dynamic>?) ?? [];
+    final docs = dataList.map((docData) => DocumentSnapshot<T>.fromMap(docData, fromFirestore)).toList();
+    return QuerySnapshot<T>(docs: docs);
   }
 }
 
-class DocumentSnapshot {
+// ✅✅✅ CLASS-KA OO SI BUUXDA LOO SAXAY ✅✅✅
+class DocumentSnapshot<T> {
   final String id;
-  final Map<String, dynamic> data;
-  DocumentSnapshot({required this.id, required this.data});
+  final Map<String, dynamic>? _dataMap;
+  final T Function(DocumentSnapshot<T>, SnapshotOptions?)? _fromFirestore;
 
-  factory DocumentSnapshot.fromMap(Map<String, dynamic> map) {
-    return DocumentSnapshot(
+  // WAA KAN CONSTRUCTOR-KA OO LA SAXAY
+  // Waxaan si toos ah u isticmaalaynaa `this._fromFirestore` si aan u "initialize" gareyno.
+  DocumentSnapshot({
+    required this.id,
+    required Map<String, dynamic>? dataMap,
+    T Function(DocumentSnapshot<T>, SnapshotOptions?)? fromFirestore,
+  })  : _dataMap = dataMap,
+        _fromFirestore = fromFirestore; // <--- HALKAN AYAA LAGU SAXAY
+
+  /// Hubi inuu document-ku jiro iyo in kale.
+  bool get exists => _dataMap != null;
+
+  /// Soo celi xogta document-ka oo ah Model-kaaga `T`.
+  /// Haddii uusan jirin, wuxuu soo celinayaa `null`.
+  T? data() {
+    if (!exists) return null;
+    if (_fromFirestore != null) {
+      // Isticmaal converter-ka si aad u hesho Model-kaaga
+      return _fromFirestore!(this, null);
+    }
+    // Haddii uusan jirin, soo celi map-ka caadiga ah
+    return _dataMap as T;
+  }
+
+  /// Wuxuu ka abuurayaa `DocumentSnapshot` `Map` caadi ah.
+  factory DocumentSnapshot.fromMap(
+      Map<String, dynamic> map, 
+      T Function(DocumentSnapshot<T>, SnapshotOptions?)? fromFirestore,
+  ) {
+    return DocumentSnapshot<T>(
       id: map['id'] as String? ?? '',
-      data: map['data'] as Map<String, dynamic>? ?? {},
+      dataMap: map['data'] as Map<String, dynamic>?,
+      fromFirestore: fromFirestore,
     );
   }
+
+  /// Wuxuu ka abuurayaa `DocumentSnapshot` `Response` ka yimid Dio.
+  factory DocumentSnapshot.fromResponse(
+      Response response, 
+      T Function(DocumentSnapshot<T>, SnapshotOptions?)? fromFirestore,
+  ) {
+    // Hubi in response.data yahay Map
+    if (response.data is Map<String, dynamic>) {
+      return DocumentSnapshot<T>.fromMap(
+        response.data as Map<String, dynamic>, 
+        fromFirestore
+      );
+    }
+    // Haddii uusan ahayn Map, tuur qalad cad
+    throw Exception("Unexpected response format from server. Expected a Map.");
+  }
 }
+
+class SnapshotOptions {}
+class SetOptions {}
+
+
+// Helper function la wadaagi karo
+HappyPlatformException _handleDioError(DioException e, String defaultMessage) {
+  if (e.response != null && e.response!.data is Map) {
+    return HappyPlatformException(e.response!.data['error'] ?? defaultMessage);
+  }
+  return HappyPlatformException(e.message ?? defaultMessage);
+}
+
+
 
 //==============================================================================
 // Qaybta 3: Realtime Database
@@ -445,6 +491,7 @@ class RealtimeSnapshot {
     );
   }
 }
+
 
 //==============================================================================
 // ✅✅✅ QAYBTA 4: AUTH - OO SI BUUXDA DIB LOO HABEEYAY ✅✅✅
@@ -671,10 +718,3 @@ class HappyPlatformException implements Exception {
   String toString() => message;
 }
 
-// Helper function la wadaagi karo
-HappyPlatformException _handleDioError(DioException e, String defaultMessage) {
-  if (e.response != null && e.response!.data is Map) {
-    return HappyPlatformException(e.response!.data['error'] ?? defaultMessage);
-  }
-  return HappyPlatformException(e.message ?? defaultMessage);
-}
