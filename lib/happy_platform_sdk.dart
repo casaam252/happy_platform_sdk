@@ -586,6 +586,14 @@ class RealtimeSnapshot {
   }
 }
 
+/// Represents the connection state of the Realtime Database client.
+enum RealtimeConnectionState {
+  connected,
+  connecting,
+  disconnected,
+}
+
+
 //==============================================================================
 // ✅✅✅ QAYBTA 4: AUTH - OO SI BUUXDA DIB LOO HABEEYAY ✅✅✅
 //==============================================================================
