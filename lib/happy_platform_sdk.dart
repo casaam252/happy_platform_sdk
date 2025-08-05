@@ -16,77 +16,91 @@ class HappyPlatform {
   factory HappyPlatform() => _instance;
   HappyPlatform._internal();
 
-  static final Map<String, Dio> _dioInstances = {};
-  static String? _apiBaseUrl;
-  static final Map<String, RealtimeDatabase> _realtimeInstances = {};
+  static final Map<String, _ProjectServices> _projectServices = {};
 
-  /// Initializes the Happy Platform SDK for one or more projects.
-  /// This must be called once, typically in your `main.dart`.
-  static void initialize({
-    required Map<String, String> projects,
+  /// Initializes the Happy Platform SDK.
+  /// This must be called once, typically in your `main.dart`, before using any services.
+  static Future<void> initialize({
+    required String projectId,
+    required String apiKey,
     required String apiBaseUrl,
-  }) {
-    if (_dioInstances.isNotEmpty) {
-      print("⚠️ Happy Platform SDK is already initialized.");
+  }) async {
+    if (_projectServices.containsKey(projectId)) {
+      print("⚠️ Project '$projectId' is already initialized.");
       return;
     }
-    _apiBaseUrl = apiBaseUrl;
-    projects.forEach((projectName, apiKey) {
-      final dio = Dio(
-        BaseOptions(
-          baseUrl: apiBaseUrl,
-          headers: {'X-API-Key': apiKey},
-          connectTimeout: const Duration(seconds: 15),
-          receiveTimeout: const Duration(seconds: 15),
-        ),
-      );
-      dio.interceptors
-          .add(LogInterceptor(responseBody: true, requestBody: true));
-      _dioInstances[projectName] = dio;
-    });
-    print(
-        "✅ Happy Platform SDK Initialized for ${projects.length} project(s).");
+
+    final dio = Dio(
+      BaseOptions(
+        baseUrl: apiBaseUrl,
+        headers: {'X-API-Key': apiKey},
+        connectTimeout: const Duration(seconds: 15),
+        receiveTimeout: const Duration(seconds: 15),
+      ),
+    );
+
+    final wsBaseUrl =
+        apiBaseUrl.replaceFirst('http', 'ws').replaceFirst('/api/v1', '');
+    final wsUrl = '$wsBaseUrl/ws?apiKey=$apiKey';
+
+    // =========================================================================
+    // ====================> HALKAN WAA XALKA OO DHAN <=========================
+    // =========================================================================
+
+    _projectServices[projectId] = _ProjectServices(
+      dio: dio,
+      wsUrl: wsUrl,
+      // 1. U gudbi `webSocketUrl` oo laga rabay `Firestore`.
+      firestore: Firestore(dio: dio, webSocketUrl: wsUrl),
+      auth: Auth(dio: dio, projectId: projectId),
+      // 2. Isticmaal constructor-ka saxda ah ee `RealtimeDatabase`.
+      realtime: RealtimeDatabase(wsUrl: wsUrl),
+    );
+
+    // =========================================================================
+    // ====================> DHAMAADKA XALKA <=================================
+    // =========================================================================
+
+    print("✅ Happy Platform SDK Initialized for project '$projectId'.");
+  }
+
+  /// Returns an instance of a project's services.
+  static _ProjectServices _getService(String projectId) {
+    final services = _projectServices[projectId];
+    if (services == null) {
+      throw Exception(
+          'Project "$projectId" not initialized. Please call HappyPlatform.initialize() first.');
+    }
+    return services;
   }
 
   /// Returns an instance of the [Auth] service for a specific project.
-  static Auth auth([String projectName = 'default']) {
-    final dio = _dioInstances[projectName];
-    if (dio == null) throw Exception('Project "$projectName" not initialized.');
-    return Auth._(dio: dio);
-  }
+  static Auth auth(String projectId) => _getService(projectId).auth;
 
   /// Returns an instance of the [Firestore] service for a specific project.
-  static Firestore firestore([String projectName = 'default']) {
-    final dio = _dioInstances[projectName];
-    if (dio == null) throw Exception('Project "$projectName" not initialized.');
-    if (_apiBaseUrl == null)
-      throw Exception('SDK not initialized. Missing API base URL.');
-
-    // Si sax ah u samee `wsUrl`
-    final wsUrl =
-        _apiBaseUrl!.replaceFirst('http', 'ws').replaceFirst('/api/v1', '');
-    return Firestore(dio: dio, webSocketUrl: wsUrl);
-  }
+  static Firestore firestore(String projectId) =>
+      _getService(projectId).firestore;
 
   /// Returns a persistent instance of the [RealtimeDatabase] service for a specific project.
-  static RealtimeDatabase realtimeDatabase([String projectName = 'default']) {
-    if (_realtimeInstances.containsKey(projectName)) {
-      final instance = _realtimeInstances[projectName]!;
-      instance.goOnline();
-      return instance;
-    }
-    final dio = _dioInstances[projectName];
-    final apiKey = dio?.options.headers['X-API-Key'];
-    if (_apiBaseUrl == null || apiKey == null) {
-      throw Exception('Project "$projectName" not initialized.');
-    }
-    final wsUrl =
-        _apiBaseUrl!.replaceFirst('http', 'ws').replaceFirst('/api/v1', '');
-    final newInstance =
-        RealtimeDatabase._internal(wsUrl: '$wsUrl/ws?apiKey=$apiKey');
-    _realtimeInstances[projectName] = newInstance;
-    return newInstance;
-  }
+  static RealtimeDatabase realtime(String projectId) =>
+      _getService(projectId).realtime;
+}
+
+/// A private class to hold all services for a single project.
+class _ProjectServices {
+  final Dio dio;
+  final String wsUrl;
+  final Auth auth;
+  final Firestore firestore;
+  final RealtimeDatabase realtime;
+
+  _ProjectServices({
+    required this.dio,
+    required this.wsUrl,
+    required this.auth,
+    required this.firestore,
+    required this.realtime,
+  });
 }
 
 //==============================================================================
@@ -443,7 +457,11 @@ class RealtimeDatabase {
   Timer? _reconnectTimer;
   bool _isConnected = false;
 
-  RealtimeDatabase._internal({required this.wsUrl})
+  // =========================================================================
+  // ====================> XALKA QALADKA 2AAD <===============================
+  // =========================================================================
+  // Ka dhig constructor-ka mid public ah oo ka saar `._internal`
+  RealtimeDatabase({required this.wsUrl})
       : _streamController = StreamController.broadcast();
 
   void _connect() {
@@ -580,30 +598,24 @@ class RealtimeSnapshot {
 /// - Manage users if you have admin privileges (`admin`).
 class Auth {
   final Dio _dio;
-  Auth._({required Dio dio}) : _dio = dio;
+  final String projectId; // <-- KU DAR KAN
 
-  String get _projectId {
-    // Si toos ah uga soo saar `projectId` URL-ka haddii loo baahdo
-    // Laakiin habka ugu fiican waa in backend-ku ka garto API Key-ga.
-    // Hadda, waxaan u qaadanaynaa inaan u baahanahay inaan ku darno `projectId` codsiyada.
-    // Tani waxay u baahan tahay in la helo hab lagu helo.
-    // Xalka ugu fudud: Waa inaan ku darnaa `projectId` marka la wacayo `auth()`
-    // Laakiin aan ka dhigno mid fudud: backend-ku ha aqoonsado.
-    return '';
-  }
-
+  // =========================================================================
+  // ====================> XALKA QALADKA 1AAD <===============================
+  // =========================================================================
+  // Ka dhig constructor-ka mid public ah oo ka saar `._`
+  Auth({required Dio dio, required this.projectId}) : _dio = dio;
   /// Registers a new user with their email, password, and full name.
   ///
   /// This is a public method that any app user can call.
   /// Throws [AuthException] if registration fails.
   Future<AuthUser> registerWithEmailAndPassword({
-    required String projectId, // <-- WAA IN LAGU DARAA
     required String fullName,
     required String email,
     required String password,
   }) async {
     try {
-      // ✅✅✅ ISTICMAAL JIDKA SAXDA AH EE BACKEND-KA ✅✅✅
+      // Hadda waxaan si toos ah u isticmaalaynaa `projectId` ee class-ka
       final response = await _dio.post(
         '/projects/$projectId/register',
         data: {
@@ -619,16 +631,11 @@ class Auth {
   }
 
   /// Signs in a user with their email and password.
-  ///
-  /// Requires the `projectId`.
-  /// Throws [AuthException] if sign-in fails.
   Future<AuthUser> signInWithEmailAndPassword({
-    required String projectId, // <-- WAA IN LAGU DARAA
     required String email,
     required String password,
   }) async {
     try {
-      // ✅✅✅ ISTICMAAL JIDKA SAXDA AH EE BACKEND-KA ✅✅✅
       final response = await _dio.post(
         '/projects/$projectId/login',
         data: {
@@ -636,7 +643,8 @@ class Auth {
           'password': password,
         },
       );
-      return AuthUser.fromJson(response.data['user'] ?? response.data);
+      // Ka saar `['user']` si uu ula jaanqaado jawaabta register
+      return AuthUser.fromJson(response.data);
     } on DioException catch (e) {
       throw AuthException.fromDioException(e);
     }
