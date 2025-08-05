@@ -464,6 +464,22 @@ class RealtimeDatabase {
   RealtimeDatabase({required this.wsUrl})
       : _streamController = StreamController.broadcast();
 
+  // Xaaladda Isku Xirka
+  RealtimeConnectionState _connectionState =
+      RealtimeConnectionState.disconnected;
+  final StreamController<RealtimeConnectionState> _connectionStateController =
+      StreamController.broadcast();
+
+  /// A stream that emits the current connection state.
+  /// KANI WAA GETTER-KII MAQNAA EE AAD U BAAHNAYD
+  Stream<RealtimeConnectionState> get onConnectionStateChanged =>
+      _connectionStateController.stream;
+
+  /// The current connection state.
+  RealtimeConnectionState get connectionState => _connectionState;
+
+  /// Returns a [DatabaseReference] for the given [path].
+
   void _connect() {
     if (_isConnected) return;
     print("🔌 [RTDB] Connecting to: $wsUrl");
@@ -516,6 +532,7 @@ class RealtimeDatabase {
   }
 
   DatabaseReference reference([String path = '/']) {
+    goOnline();
     return DatabaseReference(db: this, path: path);
   }
 
@@ -593,7 +610,6 @@ enum RealtimeConnectionState {
   disconnected,
 }
 
-
 //==============================================================================
 // ✅✅✅ QAYBTA 4: AUTH - OO SI BUUXDA DIB LOO HABEEYAY ✅✅✅
 //==============================================================================
@@ -613,6 +629,7 @@ class Auth {
   // =========================================================================
   // Ka dhig constructor-ka mid public ah oo ka saar `._`
   Auth({required Dio dio, required this.projectId}) : _dio = dio;
+
   /// Registers a new user with their email, password, and full name.
   ///
   /// This is a public method that any app user can call.
