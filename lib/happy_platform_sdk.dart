@@ -61,14 +61,15 @@ class HappyPlatform {
 
   /// Returns an instance of the [Auth] service.
   /// If [projectName] is not specified, it uses the default project.
-  static Auth auth({String? projectName}) {
+static Auth auth({String? projectName}) {
     final project = projectName ?? _defaultProjectName;
     final dio = _dioInstances[project];
     if (dio == null) throw Exception('Project "$project" not initialized.');
-    // Sii projectId si uu Auth u isticmaalo
+    
+    // ✅ Kani hadda si sax ah ayuu u shaqayn doonaa sababtoo ah
+    // `Auth` wuxuu leeyahay `._` constructor.
     return Auth._(dio: dio, projectId: project);
   }
-
   /// Returns an instance of the [Firestore] service.
   /// If [projectName] is not specified, it uses the default project.
   static Firestore firestore({String? projectName}) {
@@ -626,21 +627,28 @@ enum RealtimeConnectionState {
 /// - Manage users if you have admin privileges (`admin`).
 class Auth {
   final Dio _dio;
-  final String projectId; // ✅ WAA MUHIIM IN LA HAYO
+  final String projectId; // Wuxuu keydinayaa project ID-ga
 
+  // ✅✅✅ HALKAN WAA LA SAXAY CONSTRUCTOR-KA ✅✅✅
+  // Wuxuu noqday mid private ah oo aqbalaya dio iyo projectId
   Auth._({required Dio dio, required this.projectId}) : _dio = dio;
 
   /// Registers a new user.
-  /// Automatically uses the `projectId` from initialization.
+  /// Automatically uses the `projectId` provided during initialization.
   Future<AuthUser> registerWithEmailAndPassword({
     required String fullName,
     required String email,
     required String password,
   }) async {
     try {
+      // ✅ Looma baahna in projectId halkan lagu weydiiyo
       final response = await _dio.post(
-        '/projects/$projectId/register', // Isticmaal projectId-ga la keydiyay
-        data: {'full_name': fullName, 'email': email, 'password': password},
+        '/projects/$projectId/register',
+        data: {
+          'full_name': fullName,
+          'email': email,
+          'password': password,
+        },
       );
       return AuthUser.fromJson(response.data);
     } on DioException catch (e) {
@@ -649,15 +657,19 @@ class Auth {
   }
 
   /// Signs in a user.
-  /// Automatically uses the `projectId` from initialization.
+  /// Automatically uses the `projectId` provided during initialization.
   Future<AuthUser> signInWithEmailAndPassword({
     required String email,
     required String password,
   }) async {
     try {
+      // ✅ Looma baahna in projectId halkan lagu weydiiyo
       final response = await _dio.post(
-        '/projects/$projectId/login', // Isticmaal projectId-ga la keydiyay
-        data: {'email': email, 'password': password},
+        '/projects/$projectId/login',
+        data: {
+          'email': email,
+          'password': password,
+        },
       );
       return AuthUser.fromJson(response.data['user'] ?? response.data);
     } on DioException catch (e) {
@@ -666,9 +678,9 @@ class Auth {
   }
 
   /// Fetches all public user profiles.
-  /// Automatically uses the `projectId` from initialization.
   Future<List<AuthUser>> fetchAllUsers() async {
     try {
+      // ✅ Looma baahna in projectId halkan lagu weydiiyo
       final response = await _dio.get('/projects/$projectId/users/public');
       final List<dynamic> data = response.data ?? [];
       return data.map((json) => AuthUser.fromJson(json)).toList();
@@ -676,6 +688,7 @@ class Auth {
       throw AuthException.fromDioException(e);
     }
   }
+
   /// Access admin-only functions for user management.
   ///
   /// **Important:** This should only be used in a secure server environment
