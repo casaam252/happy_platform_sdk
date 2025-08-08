@@ -20,11 +20,13 @@ class HappyPlatform {
   // Hadda waxaan haynaa hal Dio instance oo kaliya
   static Dio? _dio;
   static String? _apiKey;
+  static String? _projectId;
   static RealtimeDatabase? _realtimeInstance;
 
-  /// Initializes the Happy Platform SDK.
+  /// Initializes the Happy Platform SDK for a single project.
   /// This must be called once, typically in your `main.dart`.
   static void initialize({
+    required String projectId,
     required String apiBaseUrl,
     required String apiKey,
   }) {
@@ -33,6 +35,7 @@ class HappyPlatform {
       return;
     }
     _apiKey = apiKey;
+    _projectId = projectId;
     _dio = Dio(
       BaseOptions(
         baseUrl: apiBaseUrl,
@@ -42,7 +45,7 @@ class HappyPlatform {
       ),
     );
     _dio!.interceptors.add(LogInterceptor(responseBody: true, requestBody: true));
-    print("✅ Happy Platform SDK Initialized Successfully.");
+    print("✅ Happy Platform SDK Initialized for project '$_projectId'.");
   }
 
   // Helper function si looga fogaado ku celcelin
@@ -55,7 +58,11 @@ class HappyPlatform {
 
   /// Returns an instance of the [Auth] service.
   static Auth auth() {
-    return Auth._(dio: _getDioInstance());
+    if (_projectId == null) {
+      throw Exception('HappyPlatform not initialized. Please call HappyPlatform.initialize() first.');
+    }
+    // Sii projectId si uu Auth u isticmaalo
+    return Auth._(dio: _getDioInstance(), projectId: _projectId!);
   }
 
   /// Returns an instance of the [Firestore] service.
@@ -67,7 +74,6 @@ class HappyPlatform {
 
   /// Returns a persistent instance of the [RealtimeDatabase] service.
   static RealtimeDatabase realtimeDatabase() {
-    // Haddii instance hore loo sameeyay, soo celi
     if (_realtimeInstance != null) {
       return _realtimeInstance!;
     }
@@ -80,6 +86,7 @@ class HappyPlatform {
     return _realtimeInstance!;
   }
 }
+
 //==============================================================================
 // Qaybta 2: Firestore (Qaybtan waa la hagaajiyay)
 //==============================================================================
@@ -595,11 +602,12 @@ enum RealtimeConnectionState {
 /// - Sign in users (`signInWithEmailAndPassword`).
 /// - Manage users if you have admin privileges (`admin`).
 class Auth {
- final Dio _dio;
-  Auth._({required Dio dio}) : _dio = dio;
+  final Dio _dio;
+  final String projectId;
 
-  // Looma baahna `projectId` halkan, sababtoo ah backend-ku wuxuu ka garanayaa API Key-ga
-  
+  Auth._({required Dio dio, required this.projectId}) : _dio = dio;
+
+  /// Registers a new user for the initialized project.
   Future<AuthUser> registerWithEmailAndPassword({
     required String fullName,
     required String email,
@@ -607,7 +615,7 @@ class Auth {
   }) async {
     try {
       final response = await _dio.post(
-        '/auth/register', // Jid fudud
+        '/projects/$projectId/register',
         data: {'full_name': fullName, 'email': email, 'password': password},
       );
       return AuthUser.fromJson(response.data);
@@ -616,13 +624,14 @@ class Auth {
     }
   }
 
+  /// Signs in a user for the initialized project.
   Future<AuthUser> signInWithEmailAndPassword({
     required String email,
     required String password,
   }) async {
     try {
       final response = await _dio.post(
-        '/auth/login', // Jid fudud
+        '/projects/$projectId/login',
         data: {'email': email, 'password': password},
       );
       return AuthUser.fromJson(response.data['user'] ?? response.data);
@@ -631,16 +640,16 @@ class Auth {
     }
   }
 
+  /// Fetches all public user profiles for the initialized project.
   Future<List<AuthUser>> fetchAllUsers() async {
     try {
-      final response = await _dio.get('/users/public'); // Jid fudud
+      final response = await _dio.get('/projects/$projectId/users/public');
       final List<dynamic> data = response.data ?? [];
       return data.map((json) => AuthUser.fromJson(json)).toList();
     } on DioException catch (e) {
       throw AuthException.fromDioException(e);
     }
   }
-  
   /// Access admin-only functions for user management.
   ///
   /// **Important:** This should only be used in a secure server environment
