@@ -34,8 +34,8 @@ class HappyPlatform {
       BaseOptions(
         baseUrl: apiBaseUrl,
         headers: {'X-API-Key': apiKey},
-        connectTimeout: const Duration(seconds: 15),
-        receiveTimeout: const Duration(seconds: 15),
+     connectTimeout: const Duration(seconds: 20), // Tusaale: 20 ilbiriqsi
+      receiveTimeout: const Duration(seconds: 60), // <<-- KA DHIG 60 ILBIRIQS (1 daqiiqo)
       ),
     );
 
