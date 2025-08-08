@@ -17,100 +17,69 @@ class HappyPlatform {
   factory HappyPlatform() => _instance;
   HappyPlatform._internal();
 
-  static final Map<String, Dio> _dioInstances = {};
-  static String? _apiBaseUrl;
- // ✅✅✅ HALKAN KU KEYDI INSTANCE-YADA REALTIME-KA ✅✅✅
-  static final Map<String, RealtimeDatabase> _realtimeInstances = {};
-  static String _defaultProjectName = 'default'; // Keydi magaca project-ka default-ka ah
+  // Hadda waxaan haynaa hal Dio instance oo kaliya
+  static Dio? _dio;
+  static String? _apiKey;
+  static RealtimeDatabase? _realtimeInstance;
 
   /// Initializes the Happy Platform SDK.
   /// This must be called once, typically in your `main.dart`.
   static void initialize({
-    required Map<String, String> projects,
     required String apiBaseUrl,
-    String defaultProjectName = 'default',
+    required String apiKey,
   }) {
-    if (_dioInstances.isNotEmpty) {
+    if (_dio != null) {
       print("⚠️ Happy Platform SDK is already initialized.");
       return;
     }
-    if (!projects.containsKey(defaultProjectName)) {
-      throw Exception(
-          "The provided 'projects' map must contain the default project name: '$defaultProjectName'");
-    }
-
-    _apiBaseUrl = apiBaseUrl;
-    _defaultProjectName = defaultProjectName;
-
-    projects.forEach((projectName, apiKey) {
-      final dio = Dio(
-        BaseOptions(
-          baseUrl: apiBaseUrl,
-          headers: {'X-API-Key': apiKey},
-          connectTimeout: const Duration(seconds: 20),
-          receiveTimeout: const Duration(seconds: 60), // Wakhti dheer
-        ),
-      );
-      dio.interceptors.add(LogInterceptor(responseBody: true, requestBody: true));
-      _dioInstances[projectName] = dio;
-    });
-    print("✅ Happy Platform SDK Initialized for ${projects.length} project(s). Default is '$_defaultProjectName'.");
+    _apiKey = apiKey;
+    _dio = Dio(
+      BaseOptions(
+        baseUrl: apiBaseUrl,
+        headers: {'X-API-Key': apiKey},
+        connectTimeout: const Duration(seconds: 20),
+        receiveTimeout: const Duration(seconds: 60),
+      ),
+    );
+    _dio!.interceptors.add(LogInterceptor(responseBody: true, requestBody: true));
+    print("✅ Happy Platform SDK Initialized Successfully.");
   }
-  
-  // ✅✅✅ HALKAN WAA ISBEDDELKA MUHIIMKA AH ✅✅✅
+
+  // Helper function si looga fogaado ku celcelin
+  static Dio _getDioInstance() {
+    if (_dio == null) {
+      throw Exception('HappyPlatform not initialized. Please call HappyPlatform.initialize() first.');
+    }
+    return _dio!;
+  }
 
   /// Returns an instance of the [Auth] service.
-  /// If [projectName] is not specified, it uses the default project.
-static Auth auth({String? projectName}) {
-    final project = projectName ?? _defaultProjectName;
-    final dio = _dioInstances[project];
-    if (dio == null) throw Exception('Project "$project" not initialized.');
-    
-    // ✅ Kani hadda si sax ah ayuu u shaqayn doonaa sababtoo ah
-    // `Auth` wuxuu leeyahay `._` constructor.
-    return Auth._(dio: dio, projectId: project);
+  static Auth auth() {
+    return Auth._(dio: _getDioInstance());
   }
-  /// Returns an instance of the [Firestore] service.
-  /// If [projectName] is not specified, it uses the default project.
-  static Firestore firestore({String? projectName}) {
-    final project = projectName ?? _defaultProjectName;
-    final dio = _dioInstances[project];
-    if (dio == null) throw Exception('Project "$project" not initialized.');
-    if (_apiBaseUrl == null) throw Exception('SDK not initialized.');
 
-    final wsUrl = _apiBaseUrl!.replaceFirst('http', 'ws').replaceFirst('/api/v1', '');
+  /// Returns an instance of the [Firestore] service.
+  static Firestore firestore() {
+    final dio = _getDioInstance();
+    final wsUrl = dio.options.baseUrl.replaceFirst('http', 'ws').replaceFirst('/api/v1', '');
     return Firestore(dio: dio, webSocketUrl: wsUrl);
   }
 
-    // ✅✅✅ HALKAN WAA FUNCTION-KA CUSUB EE REALTIME-KA ✅✅✅
   /// Returns a persistent instance of the [RealtimeDatabase] service.
-  /// If [projectName] is not specified, it uses the default project.
-  static RealtimeDatabase realtimeDatabase({String? projectName}) {
-    final project = projectName ?? _defaultProjectName;
-
-    // Haddii instance-ka hore loo sameeyay, soo celi
-    if (_realtimeInstances.containsKey(project)) {
-      return _realtimeInstances[project]!;
+  static RealtimeDatabase realtimeDatabase() {
+    // Haddii instance hore loo sameeyay, soo celi
+    if (_realtimeInstance != null) {
+      return _realtimeInstance!;
     }
     
-    // Haddii kale, samee mid cusub
-    final dio = _dioInstances[project];
-    final apiKey = dio?.options.headers['X-API-Key'];
+    final dio = _getDioInstance();
+    final wsBaseUrl = dio.options.baseUrl.replaceFirst('http', 'ws').replaceFirst('/api/v1', '');
+    final fullWsUrl = '$wsBaseUrl/ws?apiKey=$_apiKey';
 
-    if (_apiBaseUrl == null || apiKey == null) {
-      throw Exception('Project "$project" not initialized properly for Realtime Database.');
-    }
-    
-    final wsBaseUrl = _apiBaseUrl!.replaceFirst('http', 'ws').replaceFirst('/api/v1', '');
-    final fullWsUrl = '$wsBaseUrl/ws?apiKey=$apiKey'; // Ku dar API Key-ga URL-ka
-
-    final newInstance = RealtimeDatabase(wsUrl: fullWsUrl);
-    _realtimeInstances[project] = newInstance; // Ku keydi si mar dambe loo isticmaalo
-    
-    return newInstance;
+    _realtimeInstance = RealtimeDatabase(wsUrl: fullWsUrl);
+    return _realtimeInstance!;
   }
 }
-
 //==============================================================================
 // Qaybta 2: Firestore (Qaybtan waa la hagaajiyay)
 //==============================================================================
@@ -626,29 +595,20 @@ enum RealtimeConnectionState {
 /// - Sign in users (`signInWithEmailAndPassword`).
 /// - Manage users if you have admin privileges (`admin`).
 class Auth {
-  final Dio _dio;
-  final String projectId; // Wuxuu keydinayaa project ID-ga
+ final Dio _dio;
+  Auth._({required Dio dio}) : _dio = dio;
 
-  // ✅✅✅ HALKAN WAA LA SAXAY CONSTRUCTOR-KA ✅✅✅
-  // Wuxuu noqday mid private ah oo aqbalaya dio iyo projectId
-  Auth._({required Dio dio, required this.projectId}) : _dio = dio;
-
-  /// Registers a new user.
-  /// Automatically uses the `projectId` provided during initialization.
+  // Looma baahna `projectId` halkan, sababtoo ah backend-ku wuxuu ka garanayaa API Key-ga
+  
   Future<AuthUser> registerWithEmailAndPassword({
     required String fullName,
     required String email,
     required String password,
   }) async {
     try {
-      // ✅ Looma baahna in projectId halkan lagu weydiiyo
       final response = await _dio.post(
-        '/projects/$projectId/register',
-        data: {
-          'full_name': fullName,
-          'email': email,
-          'password': password,
-        },
+        '/auth/register', // Jid fudud
+        data: {'full_name': fullName, 'email': email, 'password': password},
       );
       return AuthUser.fromJson(response.data);
     } on DioException catch (e) {
@@ -656,20 +616,14 @@ class Auth {
     }
   }
 
-  /// Signs in a user.
-  /// Automatically uses the `projectId` provided during initialization.
   Future<AuthUser> signInWithEmailAndPassword({
     required String email,
     required String password,
   }) async {
     try {
-      // ✅ Looma baahna in projectId halkan lagu weydiiyo
       final response = await _dio.post(
-        '/projects/$projectId/login',
-        data: {
-          'email': email,
-          'password': password,
-        },
+        '/auth/login', // Jid fudud
+        data: {'email': email, 'password': password},
       );
       return AuthUser.fromJson(response.data['user'] ?? response.data);
     } on DioException catch (e) {
@@ -677,18 +631,16 @@ class Auth {
     }
   }
 
-  /// Fetches all public user profiles.
   Future<List<AuthUser>> fetchAllUsers() async {
     try {
-      // ✅ Looma baahna in projectId halkan lagu weydiiyo
-      final response = await _dio.get('/projects/$projectId/users/public');
+      final response = await _dio.get('/users/public'); // Jid fudud
       final List<dynamic> data = response.data ?? [];
       return data.map((json) => AuthUser.fromJson(json)).toList();
     } on DioException catch (e) {
       throw AuthException.fromDioException(e);
     }
   }
-
+  
   /// Access admin-only functions for user management.
   ///
   /// **Important:** This should only be used in a secure server environment
