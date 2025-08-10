@@ -652,32 +652,40 @@ class Auth {
   }
 
 
-   // ✅✅✅ FUNCTION CUSUB: UPDATE PROFILE (ISTICMAALAHA LAFTIISA) ✅✅✅
-  /// Updates the profile of the currently authenticated user.
-  ///
-  /// Provide only the fields you want to change.
-  /// To change the password, you must provide the [currentPassword].
-  Future<AuthUser> updateProfile({
-    String? fullName,
-    String? email,
-    String? currentPassword,
+  //==============================================================================
+  // QAYBTA CUSUB: TOKEN-LESS USER MANAGEMENT
+  //==============================================================================
+
+  // ✅✅✅ FUNCTION CUSUB (TOKEN-LESS UPDATE) ✅✅✅
+  /// Updates a user's profile using their email and current password for verification.
+  /// This method does NOT require a JWT token.
+  Future<AuthUser> updateUserByPassword({
+    required String email,
+    required String currentPassword,
+    String? newFullName,
     String? newPassword,
   }) async {
     // Diyaari xogta la dirayo
-    final Map<String, dynamic> data = {};
-    if (fullName != null) data['full_name'] = fullName;
-    if (email != null) data['email'] = email;
-    if (currentPassword != null) data['current_password'] = currentPassword;
-    if (newPassword != null) data['new_password'] = newPassword;
-
-    if (data.isEmpty) {
-      throw AuthException("No update information provided.");
+    final Map<String, dynamic> data = {
+      'email': email,
+      'current_password': currentPassword,
+    };
+    if (newFullName != null && newFullName.isNotEmpty) {
+      data['new_full_name'] = newFullName;
+    }
+    if (newPassword != null && newPassword.isNotEmpty) {
+      data['new_password'] = newPassword;
+    }
+    
+    // Hubi in ugu yaraan hal field oo cusub la bixiyay
+    if (newFullName == null && newPassword == null) {
+      throw AuthException("You must provide a new full name or a new password to update.");
     }
 
     try {
-      // Endpoint-kani wuxuu u baahan yahay in user-ku uu authenticated yahay
+      // Wac endpoint-ka cusub ee token-less
       final response = await _dio.put(
-        '/projects/$projectId/user/profile', // Tusaale endpoint
+        '/projects/$projectId/manage-user/update',
         data: data,
       );
       return AuthUser.fromJson(response.data);
@@ -686,21 +694,64 @@ class Auth {
     }
   }
 
-  // ✅✅✅ FUNCTION CUSUB: DELETE ACCOUNT (ISTICMAALAHA LAFTIISA) ✅✅✅
-  /// Permanently deletes the account of the currently authenticated user.
-  ///
-  /// This action is irreversible. It requires the user's current password
-  /// for security verification.
-  Future<void> deleteAccount({required String currentPassword}) async {
+  // ✅✅✅ FUNCTION CUSUB (TOKEN-LESS DELETE) ✅✅✅
+  /// Permanently deletes a user account using their email and password for verification.
+  /// This method does NOT require a JWT token.
+  Future<void> deleteUserByPassword({
+    required String email,
+    required String password,
+  }) async {
     try {
+      // Wac endpoint-ka cusub ee token-less
       await _dio.post(
-        '/projects/$projectId/user/delete', // Tusaale endpoint
-        data: {'password': currentPassword},
+        '/projects/$projectId/manage-user/delete',
+        data: {
+          'email': email,
+          'password': password,
+        },
       );
     } on DioException catch (e) {
       throw AuthException.fromDioException(e);
     }
   }
+
+
+  //==============================================================================
+  // QAYBTA HORE: TOKEN-BASED USER MANAGEMENT (WAAY SIDII HORE U JIRTAA)
+  //==============================================================================
+  
+  // Waan ka tagaynaa function-nadii hore ee token-ka isticmaalayay si haddii aad mustaqbalka
+  // u baahato ay diyaar kuu ahaadaan.
+
+  /// Updates the profile of the currently authenticated user (requires token).
+  Future<AuthUser> updateProfile({
+    String? fullName,
+    String? email,
+  }) async {
+    final Map<String, dynamic> data = {};
+    if (fullName != null) data['full_name'] = fullName;
+    if (email != null) data['email'] = email; // Server-ku waa inuu tan taageeraa
+
+    if (data.isEmpty) throw AuthException("No update information provided.");
+
+    try {
+      final response = await _dio.put('/projects/$projectId/user/profile', data: data);
+      return AuthUser.fromJson(response.data);
+    } on DioException catch (e) {
+      throw AuthException.fromDioException(e);
+    }
+  }
+
+  /// Permanently deletes the account of the currently authenticated user (requires token).
+  Future<void> deleteAccount() async {
+    try {
+      // Endpoint-kan wuxuu u baahan yahay token, body-giisuna wuu madhan yahay
+      await _dio.post('/projects/$projectId/user/delete');
+    } on DioException catch (e) {
+      throw AuthException.fromDioException(e);
+    }
+  }
+  
   /// Access admin-only functions for user management.
   ///
   /// **Important:** This should only be used in a secure server environment
