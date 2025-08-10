@@ -650,6 +650,57 @@ class Auth {
       throw AuthException.fromDioException(e);
     }
   }
+
+
+   // ✅✅✅ FUNCTION CUSUB: UPDATE PROFILE (ISTICMAALAHA LAFTIISA) ✅✅✅
+  /// Updates the profile of the currently authenticated user.
+  ///
+  /// Provide only the fields you want to change.
+  /// To change the password, you must provide the [currentPassword].
+  Future<AuthUser> updateProfile({
+    String? fullName,
+    String? email,
+    String? currentPassword,
+    String? newPassword,
+  }) async {
+    // Diyaari xogta la dirayo
+    final Map<String, dynamic> data = {};
+    if (fullName != null) data['full_name'] = fullName;
+    if (email != null) data['email'] = email;
+    if (currentPassword != null) data['current_password'] = currentPassword;
+    if (newPassword != null) data['new_password'] = newPassword;
+
+    if (data.isEmpty) {
+      throw AuthException("No update information provided.");
+    }
+
+    try {
+      // Endpoint-kani wuxuu u baahan yahay in user-ku uu authenticated yahay
+      final response = await _dio.put(
+        '/projects/$projectId/user/profile', // Tusaale endpoint
+        data: data,
+      );
+      return AuthUser.fromJson(response.data);
+    } on DioException catch (e) {
+      throw AuthException.fromDioException(e);
+    }
+  }
+
+  // ✅✅✅ FUNCTION CUSUB: DELETE ACCOUNT (ISTICMAALAHA LAFTIISA) ✅✅✅
+  /// Permanently deletes the account of the currently authenticated user.
+  ///
+  /// This action is irreversible. It requires the user's current password
+  /// for security verification.
+  Future<void> deleteAccount({required String currentPassword}) async {
+    try {
+      await _dio.post(
+        '/projects/$projectId/user/delete', // Tusaale endpoint
+        data: {'password': currentPassword},
+      );
+    } on DioException catch (e) {
+      throw AuthException.fromDioException(e);
+    }
+  }
   /// Access admin-only functions for user management.
   ///
   /// **Important:** This should only be used in a secure server environment
