@@ -652,17 +652,19 @@ class Auth {
   }
 
 
-  //==============================================================================
+ //==============================================================================
   // QAYBTA CUSUB: TOKEN-LESS USER MANAGEMENT
   //==============================================================================
 
-  // ✅✅✅ FUNCTION CUSUB (TOKEN-LESS UPDATE) ✅✅✅
+  // ✅✅✅ [LA HAGAAJIYAY OO DHAMMAYSTIRAN] ✅✅✅
   /// Updates a user's profile using their email and current password for verification.
+  /// This method can update the full name, email, and/or password.
   /// This method does NOT require a JWT token.
   Future<AuthUser> updateUserByPassword({
     required String email,
     required String currentPassword,
     String? newFullName,
+    String? newEmail, // ⬅️ WAA LAGU DARAY!
     String? newPassword,
   }) async {
     // Diyaari xogta la dirayo
@@ -673,13 +675,16 @@ class Auth {
     if (newFullName != null && newFullName.isNotEmpty) {
       data['new_full_name'] = newFullName;
     }
+    if (newEmail != null && newEmail.isNotEmpty) { // ⬅️ KU DAR LOGIC-KA DIRISTA EMAIL-KA CUSUB
+      data['new_email'] = newEmail;
+    }
     if (newPassword != null && newPassword.isNotEmpty) {
       data['new_password'] = newPassword;
     }
     
     // Hubi in ugu yaraan hal field oo cusub la bixiyay
-    if (newFullName == null && newPassword == null) {
-      throw AuthException("You must provide a new full name or a new password to update.");
+    if (newFullName == null && newEmail == null && newPassword == null) {
+      throw AuthException("You must provide at least one new value (full name, email, or password) to update.");
     }
 
     try {
@@ -690,6 +695,17 @@ class Auth {
       );
       return AuthUser.fromJson(response.data);
     } on DioException catch (e) {
+      // Si gaar ah u qabo qaladka 401 si user-ku u helo fariin fiican
+      if (e.response?.statusCode == 401) {
+        // Isku day inaad fariinta ka soo saarto body-ga server-ka
+        final responseData = e.response?.data;
+        if (responseData is Map && responseData.containsKey('error')) {
+          throw AuthException(responseData['error']);
+        }
+        // Haddii fariin aysan jirin, isticmaal mid guud
+        throw AuthException("Invalid current password.");
+      }
+      // Qaladaadka kale, isticmaal habkii hore
       throw AuthException.fromDioException(e);
     }
   }
@@ -714,7 +730,6 @@ class Auth {
       throw AuthException.fromDioException(e);
     }
   }
-
 
   //==============================================================================
   // QAYBTA HORE: TOKEN-BASED USER MANAGEMENT (WAAY SIDII HORE U JIRTAA)
