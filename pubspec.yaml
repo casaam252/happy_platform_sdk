@@ -1,6 +1,6 @@
 name: happy_platform_sdk
 description: A powerful Flutter client for the Happy Platform BaaS. Enables fluent, type-safe access to your self-hosted Firestore-like database.
-version: 0.28.0
+version: 0.29.0
 homepage: https://github.com/casaam252/happy_platform_sdk # <-- BEDDEL KAN!
 repository: https://github.com/casaam252/happy_platform_sdk # <-- KANNA BEDDEL!
 

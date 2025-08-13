@@ -546,10 +546,11 @@ class Auth {
   Auth._({required Dio dio, required this.projectId}) : _dio = dio;
 
   /// Registers a new user for the initialized project.
+  /// Registers a new user. All parameters are optional.
   Future<AuthUser> registerWithEmailAndPassword({
-    required String fullName,
-    required String email,
-    required String password,
+    String? fullName, // <-- Waa laga saaray 'required'
+    String? email,    // <-- Waa laga saaray 'required'
+    String? password, // <-- Waa laga saaray 'required'
   }) async {
     try {
       final response = await _dio.post(
@@ -562,10 +563,10 @@ class Auth {
     }
   }
 
-  /// Signs in a user for the initialized project.
+  /// Signs in a user. All parameters are optional.
   Future<AuthUser> signInWithEmailAndPassword({
-    required String email,
-    required String password,
+    String? email,    // <-- Waa laga saaray 'required'
+    String? password, // <-- Waa laga saaray 'required'
   }) async {
     try {
       final response = await _dio.post(
@@ -578,92 +579,60 @@ class Auth {
     }
   }
 
-  /// Fetches all public user profiles for the initialized project.
-  Future<List<AuthUser>> fetchAllUsers() async {
-    try {
-      final response = await _dio.get('/projects/$projectId/users/public');
-      final List<dynamic> data = response.data ?? [];
-      return data.map((json) => AuthUser.fromJson(json)).toList();
-    } on DioException catch (e) {
-      throw AuthException.fromDioException(e);
-    }
-  }
-
-
- //==============================================================================
-  // QAYBTA CUSUB: TOKEN-LESS USER MANAGEMENT
-  //==============================================================================
-
-  // ✅✅✅ [LA HAGAAJIYAY OO DHAMMAYSTIRAN] ✅✅✅
-  /// Updates a user's profile using their email and current password for verification.
-  /// This method can update the full name, email, and/or password.
+    /// Updates a user's profile using their email and current password for verification.
   /// This method does NOT require a JWT token.
   Future<AuthUser> updateUserByPassword({
-    required String email,
-    required String currentPassword,
+    String? email,           // <-- Waa laga saaray 'required'
+    String? currentPassword, // <-- Waa laga saaray 'required'
     String? newFullName,
-    String? newEmail, // ⬅️ WAA LAGU DARAY!
+    String? newEmail,
     String? newPassword,
   }) async {
-    // Diyaari xogta la dirayo
-    final Map<String, dynamic> data = {
-      'email': email,
-      'current_password': currentPassword,
-    };
-    if (newFullName != null && newFullName.isNotEmpty) {
-      data['new_full_name'] = newFullName;
-    }
-    if (newEmail != null && newEmail.isNotEmpty) { // ⬅️ KU DAR LOGIC-KA DIRISTA EMAIL-KA CUSUB
-      data['new_email'] = newEmail;
-    }
-    if (newPassword != null && newPassword.isNotEmpty) {
-      data['new_password'] = newPassword;
-    }
+    final Map<String, dynamic> data = {};
+    // Si caqli ah ugu dar xogta haddii la bixiyo oo keliya
+    if (email != null) data['email'] = email;
+    if (currentPassword != null) data['current_password'] = currentPassword;
+    if (newFullName != null) data['new_full_name'] = newFullName;
+    if (newEmail != null) data['new_email'] = newEmail;
+    if (newPassword != null) data['new_password'] = newPassword;
     
-    // Hubi in ugu yaraan hal field oo cusub la bixiyay
-    if (newFullName == null && newEmail == null && newPassword == null) {
-      throw AuthException("You must provide at least one new value (full name, email, or password) to update.");
+    if (data.isEmpty) {
+      throw AuthException("You must provide some information to update.");
     }
 
     try {
-      // Wac endpoint-ka cusub ee token-less
       final response = await _dio.put(
         '/projects/$projectId/manage-user/update',
         data: data,
       );
       return AuthUser.fromJson(response.data);
     } on DioException catch (e) {
-      // Si gaar ah u qabo qaladka 401 si user-ku u helo fariin fiican
-      if (e.response?.statusCode == 401) {
-        // Isku day inaad fariinta ka soo saarto body-ga server-ka
-        final responseData = e.response?.data;
-        if (responseData is Map && responseData.containsKey('error')) {
-          throw AuthException(responseData['error']);
-        }
-        // Haddii fariin aysan jirin, isticmaal mid guud
-        throw AuthException("Invalid current password.");
-      }
-      // Qaladaadka kale, isticmaal habkii hore
       throw AuthException.fromDioException(e);
     }
   }
 
-  // ✅✅✅ FUNCTION CUSUB (TOKEN-LESS DELETE) ✅✅✅
   /// Permanently deletes a user account using their email and password for verification.
   /// This method does NOT require a JWT token.
   Future<void> deleteUserByPassword({
-    required String email,
-    required String password,
+    String? email,    // <-- Waa laga saaray 'required'
+    String? password, // <-- Waa laga saaray 'required'
   }) async {
     try {
-      // Wac endpoint-ka cusub ee token-less
       await _dio.post(
         '/projects/$projectId/manage-user/delete',
-        data: {
-          'email': email,
-          'password': password,
-        },
+        data: {'email': email, 'password': password},
       );
+    } on DioException catch (e) {
+      throw AuthException.fromDioException(e);
+    }
+  }
+
+  /// Fetches all public user profiles for the initialized project.
+  Future<List<AuthUser>> fetchAllUsers() async {
+    try {
+      final response = await _dio.get('/projects/$projectId/users/public');
+      final List<dynamic> data = response.data ?? [];
+      return data.map((json) => AuthUser.fromJson(json)).toList();
     } on DioException catch (e) {
       throw AuthException.fromDioException(e);
     }
