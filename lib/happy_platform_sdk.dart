@@ -1,30 +1,26 @@
-
 library happy_platform_sdk;
 
 import 'dart:async';
 import 'dart:convert';
-
 import 'package:dio/dio.dart';
 import 'package:uuid/uuid.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 //==============================================================================
-// Qaybta 1: Entry Point & Initialization
+// Qaybta 1: Entry Point & Initialization (WAAN FUDUDEEYAY OO ADKEEYAY)
 //==============================================================================
+
 /// The main class for interacting with the Happy Platform SDK.
 class HappyPlatform {
   static final HappyPlatform _instance = HappyPlatform._internal();
   factory HappyPlatform() => _instance;
   HappyPlatform._internal();
 
-  // Hadda waxaan haynaa hal Dio instance oo kaliya
   static Dio? _dio;
-  static String? _apiKey;
   static String? _projectId;
-  static RealtimeDatabase? _realtimeInstance;
-
-  /// Initializes the Happy Platform SDK for a single project.
-  /// This must be called once, typically in your `main.dart`.
+  
+  /// Initializes the Happy Platform SDK.
+  /// This must be called once before using any other SDK methods.
   static void initialize({
     required String projectId,
     required String apiBaseUrl,
@@ -34,7 +30,6 @@ class HappyPlatform {
       print("⚠️ Happy Platform SDK is already initialized.");
       return;
     }
-    _apiKey = apiKey;
     _projectId = projectId;
     _dio = Dio(
       BaseOptions(
@@ -44,64 +39,72 @@ class HappyPlatform {
         receiveTimeout: const Duration(seconds: 60),
       ),
     );
-    _dio!.interceptors.add(LogInterceptor(responseBody: true, requestBody: true));
+    // Waxaad ku dari kartaa LogInterceptor halkan haddii aad u baahato debugging
+    // _dio!.interceptors.add(LogInterceptor(responseBody: true, requestBody: true));
     print("✅ Happy Platform SDK Initialized for project '$_projectId'.");
   }
 
-  // Helper function si looga fogaado ku celcelin
   static Dio _getDioInstance() {
-    if (_dio == null) {
-      throw Exception('HappyPlatform not initialized. Please call HappyPlatform.initialize() first.');
+    if (_dio == null || _projectId == null) {
+      throw HappyPlatformException('SDK not initialized. Call HappyPlatform.initialize() first.');
     }
     return _dio!;
   }
 
   /// Returns an instance of the [Auth] service.
   static Auth auth() {
-    if (_projectId == null) {
-      throw Exception('HappyPlatform not initialized. Please call HappyPlatform.initialize() first.');
-    }
-    // Sii projectId si uu Auth u isticmaalo
     return Auth._(dio: _getDioInstance(), projectId: _projectId!);
   }
 
   /// Returns an instance of the [Firestore] service.
   static Firestore firestore() {
     final dio = _getDioInstance();
+    // Si sax ah u samee WebSocket URL
     final wsUrl = dio.options.baseUrl.replaceFirst('http', 'ws').replaceFirst('/api/v1', '');
-    return Firestore(dio: dio, webSocketUrl: wsUrl);
-  }
-
-  /// Returns a persistent instance of the [RealtimeDatabase] service.
-  static RealtimeDatabase realtimeDatabase() {
-    if (_realtimeInstance != null) {
-      return _realtimeInstance!;
-    }
-    
-    final dio = _getDioInstance();
-    final wsBaseUrl = dio.options.baseUrl.replaceFirst('http', 'ws').replaceFirst('/api/v1', '');
-    final fullWsUrl = '$wsBaseUrl/ws?apiKey=$_apiKey';
-
-    _realtimeInstance = RealtimeDatabase(wsUrl: fullWsUrl);
-    return _realtimeInstance!;
+    return Firestore._(dio: dio, webSocketUrl: wsUrl);
   }
 }
 
 //==============================================================================
-// Qaybta 2: Firestore (Qaybtan waa la hagaajiyay)
+// QAYBTA 2: FIRESTORE (OO SI BUUXDA DIB LOO DHISAY OO AWOOD LEH)
 //==============================================================================
+
+/// The entry point for all Firestore operations.
 class Firestore {
   final Dio dio;
   final String webSocketUrl;
 
-  Firestore({required this.dio, required this.webSocketUrl});
+  Firestore._({required this.dio, required this.webSocketUrl});
 
-  CollectionReference<Map<String, dynamic>> collection(String collectionId) {
-    return CollectionReference<Map<String, dynamic>>(
+  CollectionReference<Map<String, dynamic>> collection(String collectionPath) {
+    return CollectionReference<Map<String, dynamic>>._(
       dio: dio,
-      path: collectionId,
+      path: collectionPath,
       webSocketUrl: webSocketUrl,
     );
+  }
+
+  WriteBatch batch() => WriteBatch._(dio);
+
+  Future<T> runTransaction<T>(
+    TransactionHandler<T> transactionHandler, {
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    final transaction = Transaction._(dio);
+    try {
+      final result = await transactionHandler(transaction).timeout(timeout);
+      if (transaction._writes.isNotEmpty) {
+        await dio.post(
+          '/firestore/runTransaction',
+          data: {'writes': transaction._writes},
+        );
+      }
+      return result;
+    } on DioException catch (e) {
+      throw _handleDioError(e, 'Transaction failed');
+    } catch (e) {
+      throw HappyPlatformException("Transaction failed: ${e.toString()}");
+    }
   }
 }
 
@@ -109,133 +112,186 @@ class Query<T> {
   final Dio dio;
   final String path;
   final String webSocketUrl;
-  final Map<String, dynamic> _queryParameters;
-  final T Function(DocumentSnapshot<T> snapshot, SnapshotOptions? options)?
-      fromFirestore;
-  final Map<String, dynamic> Function(T value, SetOptions? options)?
-      toFirestore;
+  final List<List<dynamic>> _whereConditions;
+  final List<Map<String, dynamic>> _orderByClauses;
+  final int? _limit;
+  final int? _offset;
 
-  Query({
+  final T Function(DocumentSnapshot<T> snapshot)? _fromFirestore;
+  final Map<String, dynamic> Function(T value, SetOptions? options)? _toFirestore;
+
+  Query._({
     required this.dio,
     required this.path,
     required this.webSocketUrl,
-    Map<String, dynamic>? queryParameters,
-    this.fromFirestore,
-    this.toFirestore,
-  }) : _queryParameters = queryParameters ?? {};
+    List<List<dynamic>>? whereConditions,
+    List<Map<String, dynamic>>? orderByClauses,
+    int? limit,
+    int? offset,
+    T Function(DocumentSnapshot<T>)? fromFirestore,
+    Map<String, dynamic> Function(T, SetOptions?)? toFirestore,
+  })  : _whereConditions = whereConditions ?? [],
+        _orderByClauses = orderByClauses ?? [],
+        _limit = limit,
+        _offset = offset,
+        _fromFirestore = fromFirestore,
+        _toFirestore = toFirestore;
+  
+  Map<String, dynamic> _buildQueryParameters() {
+    final params = <String, dynamic>{};
+    if (_whereConditions.isNotEmpty) {
+      params['where'] = _whereConditions.map((c) => '${c[0]},${c[1]},${c[2]}').toList();
+    }
+    if (_orderByClauses.isNotEmpty) {
+       params['orderBy'] = _orderByClauses.map((c) => '${c['field']},${c['direction']}').first;
+    }
+    if (_limit != null) params['limit'] = _limit;
+    if (_offset != null) params['offset'] = _offset;
+    return params;
+  }
 
-  Query<T> where(String field, {dynamic isEqualTo, dynamic isNotEqualTo}) {
-    final newParams = Map<String, dynamic>.from(_queryParameters);
-    List<String> whereClauses = List<String>.from(newParams['where'] ?? []);
-    if (isEqualTo != null) whereClauses.add('$field,==,$isEqualTo');
-    if (isNotEqualTo != null) whereClauses.add('$field,!=,$isNotEqualTo');
-    newParams['where'] = whereClauses;
-    return Query<T>(
-        dio: dio,
-        path: path,
-        webSocketUrl: webSocketUrl,
-        queryParameters: newParams,
-        fromFirestore: fromFirestore,
-        toFirestore: toFirestore);
+  Query<T> _copyWith({
+    List<List<dynamic>>? whereConditions,
+    List<Map<String, dynamic>>? orderByClauses,
+    int? limit,
+    int? offset,
+  }) {
+    return Query._(
+      dio: dio,
+      path: path,
+      webSocketUrl: webSocketUrl,
+      whereConditions: whereConditions ?? _whereConditions,
+      orderByClauses: orderByClauses ?? _orderByClauses,
+      limit: limit ?? _limit,
+      offset: offset ?? _offset,
+      fromFirestore: _fromFirestore,
+      toFirestore: _toFirestore,
+    );
+  }
+
+  Query<T> where(String field, {
+    dynamic isEqualTo,
+    dynamic isNotEqualTo,
+    dynamic isLessThan,
+    dynamic isLessThanOrEqualTo,
+    dynamic isGreaterThan,
+    dynamic isGreaterThanOrEqualTo,
+    List<dynamic>? whereIn,
+    List<dynamic>? whereNotIn,
+    dynamic arrayContains,
+    List<dynamic>? arrayContainsAny,
+  }) {
+    final newConditions = List<List<dynamic>>.from(_whereConditions);
+    if (isEqualTo != null) newConditions.add([field, '==', isEqualTo]);
+    if (isNotEqualTo != null) newConditions.add([field, '!=', isNotEqualTo]);
+    if (isLessThan != null) newConditions.add([field, '<', isLessThan]);
+    if (isLessThanOrEqualTo != null) newConditions.add([field, '<=', isLessThanOrEqualTo]);
+    if (isGreaterThan != null) newConditions.add([field, '>', isGreaterThan]);
+    if (isGreaterThanOrEqualTo != null) newConditions.add([field, '>=', isGreaterThanOrEqualTo]);
+    if (whereIn != null) newConditions.add([field, 'in', whereIn.join(';')]);
+    if (whereNotIn != null) newConditions.add([field, 'not-in', whereNotIn.join(';')]);
+    if (arrayContains != null) newConditions.add([field, 'array-contains', arrayContains]);
+    if (arrayContainsAny != null) newConditions.add([field, 'array-contains-any', arrayContainsAny.join(';')]);
+
+    return _copyWith(whereConditions: newConditions);
   }
 
   Query<T> orderBy(String field, {bool descending = false}) {
-    final newParams = Map<String, dynamic>.from(_queryParameters);
-    newParams['orderBy'] = '$field,${descending ? 'desc' : 'asc'}';
-    return Query<T>(
-        dio: dio,
-        path: path,
-        webSocketUrl: webSocketUrl,
-        queryParameters: newParams,
-        fromFirestore: fromFirestore,
-        toFirestore: toFirestore);
+     final newOrderBy = List<Map<String, dynamic>>.from(_orderByClauses);
+     newOrderBy.add({'field': field, 'direction': descending ? 'desc' : 'asc'});
+     return _copyWith(orderByClauses: newOrderBy);
   }
 
-  Query<T> limit(int count) {
-    final newParams = Map<String, dynamic>.from(_queryParameters);
-    newParams['limit'] = count;
-    return Query<T>(
-        dio: dio,
-        path: path,
-        webSocketUrl: webSocketUrl,
-        queryParameters: newParams,
-        fromFirestore: fromFirestore,
-        toFirestore: toFirestore);
-  }
+  Query<T> limit(int count) => _copyWith(limit: count);
 
-  Future<QuerySnapshot<T>> get() async {
+  Future<QuerySnapshot<T>> get([GetOptions? options]) async {
+    if (options?.source == Source.cache) {
+      print("⚠️ Cache-first not yet implemented. Fetching from server.");
+    }
     try {
-      final response = await dio.get('/firestore/collections/$path/documents',
-          queryParameters: _queryParameters);
-      return QuerySnapshot<T>.fromResponse(response, fromFirestore);
+      final response = await dio.get(
+        '/firestore/collections/$path/documents',
+        queryParameters: _buildQueryParameters(),
+      );
+      return QuerySnapshot<T>._fromResponse(response, _fromFirestore);
     } on DioException catch (e) {
       throw _handleDioError(e, 'Failed to get documents');
     }
   }
+
+  Stream<QuerySnapshot<T>> snapshots() {
+    // Tani waa hirgelin fudud oo 'polling' ah
+    final streamController = StreamController<QuerySnapshot<T>>.broadcast();
+    Timer? timer;
+
+    void fetchData() async {
+       try {
+         final snapshot = await get();
+         if (!streamController.isClosed) streamController.add(snapshot);
+       } catch (e) {
+         if (!streamController.isClosed) streamController.addError(e);
+       }
+    }
+    
+    fetchData();
+    timer = Timer.periodic(const Duration(seconds: 15), (timer) => fetchData());
+
+    streamController.onCancel = () {
+      timer?.cancel();
+      streamController.close();
+    };
+
+    return streamController.stream;
+  }
 }
-
+/// A CollectionReference can be used for adding documents, getting document references, and querying for documents.
 class CollectionReference<T> extends Query<T> {
-  CollectionReference({
-    required super.dio,
-    required super.path,
-    required super.webSocketUrl,
-    super.fromFirestore,
-    super.toFirestore,
-  });
+  CollectionReference._({
+    required Dio dio,
+    required String path,
+    required String webSocketUrl,
+    T Function(DocumentSnapshot<T>)? fromFirestore,
+    Map<String, dynamic> Function(T, SetOptions?)? toFirestore,
+  }) : super._(
+          dio: dio,
+          path: path,
+          webSocketUrl: webSocketUrl,
+          fromFirestore: fromFirestore,
+          toFirestore: toFirestore,
+        );
 
-  DocumentReference<T> document(String documentId) {
-    return DocumentReference<T>(
+  /// Returns a [DocumentReference] with the provided [documentId].
+  DocumentReference<T> doc([String? documentId]) {
+    final id = documentId ?? const Uuid().v4();
+    
+    // =========================================================================
+    // ====================> HALKAN WAA XALKA OO DHAN <=========================
+    // =========================================================================
+    // Waa inaad u gudbisaa `_fromFirestore` iyo `_toFirestore` DocumentReference-ka.
+    return DocumentReference<T>._(
       dio: dio,
       collectionPath: path,
-      documentId: documentId,
+      documentId: id,
       webSocketUrl: webSocketUrl,
-      fromFirestore: fromFirestore,
-      toFirestore: toFirestore,
+      fromFirestore: _fromFirestore, 
+      toFirestore: _toFirestore,   
     );
+    // =========================================================================
   }
 
-  // ✅✅✅ HALKAN WAA LA HAGAAJIYAY ✅✅✅
-  /// Adds a new document to this collection with the given [data].
+  /// Adds a new document to this collection with the given data.
   Future<DocumentReference<T>> add(T data) async {
-    final Map<String, dynamic> mapData;
-
-    if (toFirestore != null) {
-      // Habka 1: Haddii `withConverter` la isticmaalay, u beddel `Object` -> `Map`.
-      mapData = toFirestore!(data, null);
-    } else if (data is Map<String, dynamic>) {
-      // Habka 2: Haddii aan `withConverter` la isticmaalin, hubi in xogtu tahay `Map`.
-      mapData = data;
-    } else {
-      // Haddii kale, tuur qalad cad.
-      throw Exception(
-          'Cannot add typed data of type `${data.runtimeType}` without a `toFirestore` converter. '
-          'Use .withConverter() on the collection reference, or provide a Map<String, dynamic>.');
-    }
-
-    try {
-      final response = await dio.post('/firestore/collections/$path/documents',
-          data: mapData);
-      final newDocId = response.data['id'] as String;
-      return DocumentReference<T>(
-        dio: dio,
-        collectionPath: path,
-        documentId: newDocId,
-        webSocketUrl: webSocketUrl,
-        fromFirestore: fromFirestore,
-        toFirestore: toFirestore,
-      );
-    } on DioException catch (e) {
-      throw _handleDioError(e, 'Failed to create document');
-    }
+    final docRef = doc(); // Samee ID cusub
+    await docRef.set(data);
+    return docRef;
   }
 
+  /// Returns a new [CollectionReference] that utilizes the specified converter.
   CollectionReference<R> withConverter<R>({
-    required R Function(DocumentSnapshot<R> snapshot, SnapshotOptions? options)
-        fromFirestore,
-    required Map<String, dynamic> Function(R value, SetOptions? options)
-        toFirestore,
+    required R Function(DocumentSnapshot<R> snapshot) fromFirestore,
+    required Map<String, dynamic> Function(R value, SetOptions? options) toFirestore,
   }) {
-    return CollectionReference<R>(
+    return CollectionReference<R>._(
       dio: dio,
       path: path,
       webSocketUrl: webSocketUrl,
@@ -245,76 +301,70 @@ class CollectionReference<T> extends Query<T> {
   }
 }
 
+/// A DocumentReference refers to a document location in a Firestore database.
 class DocumentReference<T> {
   final Dio dio;
   final String collectionPath;
   final String documentId;
   final String webSocketUrl;
-  final T Function(DocumentSnapshot<T>, SnapshotOptions?)? fromFirestore;
-  final Map<String, dynamic> Function(T, SetOptions?)? toFirestore;
-
-  DocumentReference({
+  
+  // Hadda waa `nullable` si aysan dhibaato u keenin.
+  final T Function(DocumentSnapshot<T>)? _fromFirestore;
+  final Map<String, dynamic> Function(T, SetOptions?)? _toFirestore;
+  
+   DocumentReference._({
     required this.dio,
     required this.collectionPath,
     required this.documentId,
     required this.webSocketUrl,
-    this.fromFirestore,
-    this.toFirestore,
-  });
+    // Waa inaad u gudbisaa `_fromFirestore` iyo `_toFirestore` si toos ah
+    T Function(DocumentSnapshot<T>)? fromFirestore,
+    Map<String, dynamic> Function(T, SetOptions?)? toFirestore,
+  }) : _fromFirestore = fromFirestore, 
+       _toFirestore = toFirestore;
+  // =========================================================================
 
   String get id => documentId;
-  String get _documentPath =>
-      '/firestore/collections/$collectionPath/documents/$documentId';
-
-  Future<DocumentSnapshot<T>> get() async {
-    try {
+  String get _documentPath => '/firestore/collections/$collectionPath/documents/$documentId';
+  
+  Future<DocumentSnapshot<T>> get([GetOptions? options]) async {
+     try {
       final response = await dio.get(_documentPath);
-      return DocumentSnapshot<T>.fromResponse(response, fromFirestore);
+      return DocumentSnapshot<T>._fromResponse(response, _fromFirestore);
     } on DioException catch (e) {
       if (e.response?.statusCode == 404) {
-        return DocumentSnapshot<T>(
-            id: documentId, dataMap: null, fromFirestore: fromFirestore);
+        return DocumentSnapshot<T>._(id: documentId, dataMap: null, fromFirestore: _fromFirestore);
       }
       throw _handleDioError(e, 'Failed to get document');
     }
   }
 
-  // ✅✅✅ HALKAN WAA LA HAGAAJIYAY ✅✅✅
-  /// Overwrites the document with the given [data].
   Future<void> set(T data, [SetOptions? options]) async {
-    final Map<String, dynamic> mapData;
-
-    if (toFirestore != null) {
-      // Habka 1: Haddii `withConverter` la isticmaalay.
-      mapData = toFirestore!(data, options);
-    } else if (data is Map<String, dynamic>) {
-      // Habka 2: Haddii xogtu tahay `Map` caadi ah.
-      mapData = data;
-    } else {
-      // Haddii kale, tuur qalad.
-      throw Exception(
-          'Cannot set typed data of type `${data.runtimeType}` without a `toFirestore` converter. '
-          'Use .withConverter() on the collection reference, or provide a Map<String, dynamic>.');
-    }
-
+    final mapData = _toFirestore != null
+        ? _toFirestore!(data, options)
+        : data as Map<String, dynamic>;
+    
     try {
-      await dio.put(_documentPath, data: mapData);
+      if (options?.merge == true) {
+        await dio.patch(_documentPath, data: mapData);
+      } else {
+        await dio.put(_documentPath, data: mapData);
+      }
     } on DioException catch (e) {
       throw _handleDioError(e, 'Failed to set document');
     }
   }
-
-  /// Updates parts of the document with the given [data].
-  Future<void> update(Map<String, Object?> data) async {
-    try {
+  
+  Future<void> update(Map<Object, Object?> data) async {
+     try {
       await dio.patch(_documentPath, data: data);
     } on DioException catch (e) {
-      throw _handleDioError(e, 'Failed to update document data');
+      throw _handleDioError(e, 'Failed to update document');
     }
   }
 
   Future<void> delete() async {
-    try {
+     try {
       await dio.delete(_documentPath);
     } on DioException catch (e) {
       throw _handleDioError(e, 'Failed to delete document');
@@ -322,64 +372,49 @@ class DocumentReference<T> {
   }
 
   Stream<DocumentSnapshot<T>> snapshots() {
-    // ... (Koodhkaagii hore ee qaybtan waa sax)
-    final streamController = StreamController<DocumentSnapshot<T>>();
-    late WebSocketChannel channel;
-    void connect() {
-      try {
-        final wsPath = '$webSocketUrl$_documentPath';
-        channel = WebSocketChannel.connect(Uri.parse(wsPath));
-        channel.stream.listen(
-          (message) {
-            final data = json.decode(message) as Map<String, dynamic>;
-            streamController
-                .add(DocumentSnapshot<T>.fromMap(data, fromFirestore));
-          },
-          onDone: () => connect(),
-          onError: (error) {
-            streamController.addError(error);
-            connect();
-          },
-        );
-      } catch (e) {
-        streamController.addError(e);
-      }
-    }
-
-    connect();
-    streamController.onCancel = () => channel.sink.close();
-    return streamController.stream;
+     final streamController = StreamController<DocumentSnapshot<T>>.broadcast();
+     Timer? timer;
+     void fetchData() async {
+       try {
+         final snapshot = await get();
+         if (!streamController.isClosed) streamController.add(snapshot);
+       } catch(e) {
+         if (!streamController.isClosed) streamController.addError(e);
+       }
+     }
+     fetchData();
+     timer = Timer.periodic(const Duration(seconds: 15), (_) => fetchData());
+     streamController.onCancel = () => timer?.cancel();
+     return streamController.stream;
   }
 }
 
 class QuerySnapshot<T> {
-  // ... (Koodhkaagii hore waa sax)
   final List<DocumentSnapshot<T>> docs;
   int get size => docs.length;
   bool get isEmpty => docs.isEmpty;
 
-  QuerySnapshot({required this.docs});
+  QuerySnapshot._({required this.docs});
 
-  factory QuerySnapshot.fromResponse(Response response,
-      T Function(DocumentSnapshot<T>, SnapshotOptions?)? fromFirestore) {
+  factory QuerySnapshot._fromResponse(Response response,
+      T Function(DocumentSnapshot<T>)? fromFirestore) {
     final List<dynamic> dataList = (response.data as List<dynamic>?) ?? [];
     final docs = dataList
-        .map((docData) => DocumentSnapshot<T>.fromMap(docData, fromFirestore))
+        .map((docData) => DocumentSnapshot<T>._fromMap(docData, fromFirestore))
         .toList();
-    return QuerySnapshot<T>(docs: docs);
+    return QuerySnapshot._(docs: docs);
   }
 }
 
 class DocumentSnapshot<T> {
-  // ... (Koodhkaagii hore waa sax)
   final String id;
   final Map<String, dynamic>? _dataMap;
-  final T Function(DocumentSnapshot<T>, SnapshotOptions?)? _fromFirestore;
+  final T Function(DocumentSnapshot<T>)? _fromFirestore;
 
-  DocumentSnapshot({
+  DocumentSnapshot._({
     required this.id,
     required Map<String, dynamic>? dataMap,
-    T Function(DocumentSnapshot<T>, SnapshotOptions?)? fromFirestore,
+    T Function(DocumentSnapshot<T>)? fromFirestore,
   })  : _dataMap = dataMap,
         _fromFirestore = fromFirestore;
 
@@ -388,37 +423,100 @@ class DocumentSnapshot<T> {
   T? data() {
     if (!exists) return null;
     if (_fromFirestore != null) {
-      return _fromFirestore!(this, null);
+      return _fromFirestore!(this);
     }
     return _dataMap as T;
   }
 
-  factory DocumentSnapshot.fromMap(
+  factory DocumentSnapshot._fromMap(
     Map<String, dynamic> map,
-    T Function(DocumentSnapshot<T>, SnapshotOptions?)? fromFirestore,
+    T Function(DocumentSnapshot<T>)? fromFirestore,
   ) {
-    return DocumentSnapshot<T>(
+    return DocumentSnapshot._(
       id: map['id'] as String? ?? '',
       dataMap: map['data'] as Map<String, dynamic>?,
       fromFirestore: fromFirestore,
     );
   }
 
-  factory DocumentSnapshot.fromResponse(
+  factory DocumentSnapshot._fromResponse(
     Response response,
-    T Function(DocumentSnapshot<T>, SnapshotOptions?)? fromFirestore,
+    T Function(DocumentSnapshot<T>)? fromFirestore,
   ) {
     if (response.data is Map<String, dynamic>) {
-      return DocumentSnapshot<T>.fromMap(
+      return DocumentSnapshot._fromMap(
           response.data as Map<String, dynamic>, fromFirestore);
     }
-    throw Exception("Unexpected response format from server. Expected a Map.");
+    throw HappyPlatformException("Unexpected response format. Expected a Map.");
   }
 }
 
-class SnapshotOptions {}
+class WriteBatch {
+  final Dio _dio;
+  final List<Map<String, dynamic>> _writes = [];
 
-class SetOptions {}
+  WriteBatch._(this._dio);
+
+  void set<T>(DocumentReference<T> document, T data, [SetOptions? options]) {
+    final mapData = document._toFirestore != null
+        ? document._toFirestore!(data, options)
+        : data as Map<String, dynamic>;
+    _writes.add({'type': options?.merge == true ? 'update' : 'set', 'path': document._documentPath, 'data': mapData});
+  }
+
+  void update(DocumentReference document, Map<Object, Object?> data) {
+    _writes.add({'type': 'update', 'path': document._documentPath, 'data': data});
+  }
+
+  void delete(DocumentReference document) {
+     _writes.add({'type': 'delete', 'path': document._documentPath});
+  }
+
+  Future<void> commit() async {
+    try {
+      await _dio.post('/firestore/batchWrite', data: {'writes': _writes});
+    } on DioException catch (e) {
+      throw _handleDioError(e, 'Batch write failed');
+    }
+  }
+}
+
+class Transaction {
+  final Dio _dio;
+  final List<Map<String, dynamic>> _writes = [];
+  Transaction._(this._dio);
+
+  Future<DocumentSnapshot<T>> get<T>(DocumentReference<T> document) {
+    if (_writes.isNotEmpty) {
+      throw HappyPlatformException('Firestore transactions require all reads to be executed before all writes.');
+    }
+    return document.get();
+  }
+
+  void set<T>(DocumentReference<T> document, T data, [SetOptions? options]) {
+    final mapData = document._toFirestore != null
+        ? document._toFirestore!(data, options)
+        : data as Map<String, dynamic>;
+    _writes.add({'type': options?.merge == true ? 'update' : 'set', 'path': document._documentPath, 'data': mapData});
+  }
+
+  void update(DocumentReference document, Map<Object, Object?> data) {
+    _writes.add({'type': 'update', 'path': document._documentPath, 'data': data});
+  }
+
+  void delete(DocumentReference document) {
+     _writes.add({'type': 'delete', 'path': document._documentPath});
+  }
+}
+
+typedef TransactionHandler<T> = Future<T> Function(Transaction transaction);
+
+// Helper Classes
+class FieldValue { FieldValue._(); static FieldValue serverTimestamp() => FieldValue._(); static FieldValue delete() => FieldValue._(); }
+class GetOptions { final Source source; const GetOptions({this.source = Source.server}); }
+class SetOptions { final bool merge; const SetOptions({this.merge = false}); }
+enum Source { server, cache, serverAndCache }
+
 
 HappyPlatformException _handleDioError(DioException e, String defaultMessage) {
   if (e.response != null && e.response!.data is Map) {
@@ -430,169 +528,9 @@ HappyPlatformException _handleDioError(DioException e, String defaultMessage) {
   return HappyPlatformException(e.message ?? defaultMessage);
 }
 
-//==============================================================================
-// Qaybta 3: Realtime Database
-//==============================================================================
-
-class RealtimeDatabase {
-  final String wsUrl;
-  WebSocketChannel? _channel;
-  final StreamController<RealtimeSnapshot> _streamController;
-  Timer? _reconnectTimer;
-  bool _isConnected = false;
-
-  // ✅ Waa inuu noqdaa mid public ah
-  RealtimeDatabase({required this.wsUrl})
-      : _streamController = StreamController.broadcast();
-
-  // Xaaladda Isku Xirka
-  RealtimeConnectionState _connectionState =
-      RealtimeConnectionState.disconnected;
-  final StreamController<RealtimeConnectionState> _connectionStateController =
-      StreamController.broadcast();
-
-  /// A stream that emits the current connection state.
-  /// KANI WAA GETTER-KII MAQNAA EE AAD U BAAHNAYD
-  Stream<RealtimeConnectionState> get onConnectionStateChanged =>
-      _connectionStateController.stream;
-
-  /// The current connection state.
-  RealtimeConnectionState get connectionState => _connectionState;
-
-  /// Returns a [DatabaseReference] for the given [path].
-
-  void _connect() {
-    if (_isConnected) return;
-    print("🔌 [RTDB] Connecting to: $wsUrl");
-    try {
-      _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
-      _isConnected = true;
-      _reconnectTimer?.cancel(); // Jooji isku daygii hore ee reconnect
-
-      _channel!.stream.listen(
-        (message) {
-          try {
-            final decoded = json.decode(message);
-            if (decoded['type'] == 'data' || decoded['type'] == 'update') {
-              _streamController.add(RealtimeSnapshot.fromJson(decoded));
-            }
-          } catch (e) {
-            _streamController
-                .addError(Exception('Failed to parse server message: $e'));
-          }
-        },
-        onDone: () {
-          if (_isConnected) {
-            _isConnected = false;
-            _streamController.addError(Exception('Connection closed.'));
-            _tryReconnect();
-          }
-        },
-        onError: (error) {
-          _isConnected = false;
-          _streamController.addError(error);
-          _tryReconnect();
-        },
-        cancelOnError: false,
-      );
-    } catch (e) {
-      _isConnected = false;
-      _streamController.addError(Exception('Failed to connect: $e'));
-      _tryReconnect();
-    }
-  }
-
-  void _tryReconnect() {
-    if (!_isConnected) {
-      _reconnectTimer?.cancel();
-      _reconnectTimer = Timer(const Duration(seconds: 5), () {
-        print("🔄 [RTDB] Attempting to reconnect...");
-        _connect();
-      });
-    }
-  }
-
-  DatabaseReference reference([String path = '/']) {
-    goOnline();
-    return DatabaseReference(db: this, path: path);
-  }
-
-  void goOffline() {
-    _isConnected = false;
-    _reconnectTimer?.cancel();
-    _channel?.sink.close();
-    _channel = null;
-  }
-
-  void goOnline() {
-    _connect();
-  }
-}
-
-class DatabaseReference {
-  final RealtimeDatabase db;
-  final String path;
-
-  DatabaseReference({required this.db, required this.path});
-
-  Stream<RealtimeSnapshot> onValue() {
-    _sendMessage({'type': 'subscribe', 'path': path});
-    return db._streamController.stream
-        .where((snapshot) => snapshot.path == path);
-  }
-
-  DatabaseReference push() {
-    final newId = const Uuid().v4();
-    return DatabaseReference(
-        db: db, path: path == '/' ? newId : '$path/$newId');
-  }
-
-  Future<void> update(Map<String, dynamic> data) async {
-    _sendMessage({'type': 'update', 'path': path, 'payload': data});
-  }
-
-  Future<void> set(dynamic data) async {
-    _sendMessage({'type': 'set', 'path': path, 'payload': data});
-  }
-
-  Future<void> remove() async {
-    await set(null);
-  }
-
-  void off() {
-    _sendMessage({'type': 'unsubscribe', 'path': path});
-  }
-
-  void _sendMessage(Map<String, dynamic> message) {
-    if (db._channel != null) {
-      db._channel!.sink.add(json.encode(message));
-    }
-  }
-}
-
-class RealtimeSnapshot {
-  final String path;
-  final dynamic value;
-
-  RealtimeSnapshot({required this.path, this.value});
-
-  factory RealtimeSnapshot.fromJson(Map<String, dynamic> json) {
-    return RealtimeSnapshot(
-      path: json['path'],
-      value: json['payload'],
-    );
-  }
-}
-
-/// Represents the connection state of the Realtime Database client.
-enum RealtimeConnectionState {
-  connected,
-  connecting,
-  disconnected,
-}
 
 //==============================================================================
-// ✅✅✅ QAYBTA 4: AUTH - OO SI BUUXDA DIB LOO HABEEYAY ✅✅✅
+// ✅✅✅ QAYBTA 3: AUTH - OO SI BUUXDA DIB LOO HABEEYAY ✅✅✅
 //==============================================================================
 
 /// The entry point for all authentication operations for a project.
