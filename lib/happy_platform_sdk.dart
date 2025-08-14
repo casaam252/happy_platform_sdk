@@ -263,27 +263,59 @@ class CollectionReference<T> extends Query<T> {
   /// Returns a [DocumentReference] with the provided [documentId].
   DocumentReference<T> doc([String? documentId]) {
     final id = documentId ?? const Uuid().v4();
-    
-    // =========================================================================
-    // ====================> HALKAN WAA XALKA OO DHAN <=========================
-    // =========================================================================
-    // Waa inaad u gudbisaa `_fromFirestore` iyo `_toFirestore` DocumentReference-ka.
     return DocumentReference<T>._(
       dio: dio,
       collectionPath: path,
       documentId: id,
       webSocketUrl: webSocketUrl,
-      fromFirestore: _fromFirestore, 
-      toFirestore: _toFirestore,   
+      fromFirestore: _fromFirestore,
+      toFirestore: _toFirestore,
     );
-    // =========================================================================
   }
 
-  /// Adds a new document to this collection with the given data.
+  // =========================================================================
+  // ======================> HALKAN WAA XALKA OO DHAN <=======================
+  // Waxaan dib u qornay `add` function-ka si uu u isticmaalo POST.
+  // =========================================================================
+  
+  /// Adds a new document to this collection with the given [data], assigning it a
+  /// server-generated ID.
   Future<DocumentReference<T>> add(T data) async {
-    final docRef = doc(); // Samee ID cusub
-    await docRef.set(data);
-    return docRef;
+    // Hubi in xogta loo beddeli karo Map.
+    final mapData = _toFirestore != null
+        ? _toFirestore!(data, null) // options waa null marka la abuurayo
+        : data as Map<String, dynamic>;
+
+    try {
+      // U dir POST request jidka collection-ka, ee maaha document gaar ah.
+      // Tusaale: POST /firestore/collections/app_categories/documents
+      final response = await dio.post(
+        '/firestore/collections/$path/documents',
+        data: mapData,
+      );
+
+      // Server-ku wuxuu soo celin doonaa document-ka la abuuray oo leh ID.
+      // Ka soo saar ID-ga jawaabta.
+      final responseData = response.data as Map<String, dynamic>;
+      final newDocumentId = responseData['id'] as String?;
+
+      if (newDocumentId == null) {
+        throw HappyPlatformException('Server did not return a document ID after creation.');
+      }
+
+      // Soo celi DocumentReference cusub oo leh ID-ga ka yimid server-ka.
+      return DocumentReference<T>._(
+        dio: dio,
+        collectionPath: path,
+        documentId: newDocumentId,
+        webSocketUrl: webSocketUrl,
+        fromFirestore: _fromFirestore,
+        toFirestore: _toFirestore,
+      );
+
+    } on DioException catch (e) {
+      throw _handleDioError(e, 'Failed to add document');
+    }
   }
 
   /// Returns a new [CollectionReference] that utilizes the specified converter.
