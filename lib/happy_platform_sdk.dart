@@ -577,6 +577,33 @@ class Auth {
 
   Auth._({required Dio dio, required this.projectId}) : _dio = dio;
 
+
+
+  // ✅✅✅ FUNCTION CUSUB: Ku dar function-kan oo dhan
+  /// Signs in a user using a Google ID Token.
+  ///
+  /// Call this method after your app has successfully obtained an ID Token
+  /// from the Google Sign-In flow. The SDK will send this token to your
+  /// backend for verification.
+  ///
+  /// Throws [AuthException] on failure.
+  Future<AuthUser> signInWithGoogle({
+    required String idToken,
+  }) async {
+    try {
+      // Wuxuu yeerayaa endpoint-ka cusub ee aan backend-ka ku samaynay
+      final response = await _dio.post(
+        '/projects/$projectId/auth/google',
+        data: {'idToken': idToken},
+      );
+      // Backend-ku wuxuu soo celin doonaa laba shay: 'token' iyo 'user'
+      // Waxaan qabanaynaa oo keliya 'user' object-ka
+      return AuthUser.fromJson(response.data['user'] ?? response.data);
+    } on DioException catch (e) {
+      throw AuthException.fromDioException(e);
+    }
+  }
+
   /// Registers a new user for the initialized project.
   /// Registers a new user. All parameters are optional.
   Future<AuthUser> registerWithEmailAndPassword({
