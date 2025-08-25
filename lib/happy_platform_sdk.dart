@@ -1,10 +1,9 @@
 library happy_platform_sdk;
 
 import 'dart:async';
-import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:uuid/uuid.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
 
 //==============================================================================
 // Qaybta 1: Entry Point & Initialization (WAAN FUDUDEEYAY OO ADKEEYAY)
@@ -19,13 +18,20 @@ class HappyPlatform {
   static Dio? _dio;
   static String? _projectId;
   
+  // =========================================================================
+  // ======================> HALKAN WAA ISBEDDELKA MUHIIMKA AH <===============
+  // =========================================================================
+
   /// Initializes the Happy Platform SDK.
   /// This must be called once before using any other SDK methods.
   static void initialize({
     required String projectId,
-    required String apiBaseUrl,
     required String apiKey,
   }) {
+    // Sidaad u codsatay, apiBaseUrl waa laga saaray function-ka,
+    // waxaana si toos ah loogu dhex qeexay halkan.
+    const String apiBaseUrl = "http://77.37.97.156:8080/api/v1"; 
+
     if (_dio != null) {
       print("⚠️ Happy Platform SDK is already initialized.");
       return;
@@ -33,7 +39,7 @@ class HappyPlatform {
     _projectId = projectId;
     _dio = Dio(
       BaseOptions(
-        baseUrl: apiBaseUrl,
+        baseUrl: apiBaseUrl, // Hadda wuxuu isticmaalayaa URL-ka aad dhex gelisay
         headers: {'X-API-Key': apiKey},
         connectTimeout: const Duration(seconds: 20),
         receiveTimeout: const Duration(seconds: 60),
@@ -43,6 +49,7 @@ class HappyPlatform {
     // _dio!.interceptors.add(LogInterceptor(responseBody: true, requestBody: true));
     print("✅ Happy Platform SDK Initialized for project '$_projectId'.");
   }
+
 
   static Dio _getDioInstance() {
     if (_dio == null || _projectId == null) {
@@ -60,10 +67,12 @@ class HappyPlatform {
   static Firestore firestore() {
     final dio = _getDioInstance();
     // Si sax ah u samee WebSocket URL
+    // Wuxuu si toos ah uga soo qaadan doonaa base URL-ka cusub
     final wsUrl = dio.options.baseUrl.replaceFirst('http', 'ws').replaceFirst('/api/v1', '');
     return Firestore._(dio: dio, webSocketUrl: wsUrl);
   }
 }
+
 
 //==============================================================================
 // QAYBTA 2: FIRESTORE (OO SI BUUXDA DIB LOO DHISAY OO AWOOD LEH)
